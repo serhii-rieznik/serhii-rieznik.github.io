@@ -2,7 +2,7 @@
 **Metal ray-tracer: tracing our first triangle**
 
 In this post I will describe the basics of using Metal Performance Shaders.
-We will set-up a project and execute some compute shaders on GPU.
+We will set-up a project and execute some compute shaders on GPU. And then we are going to trace one hard-coded triangle.
 
 [Source Code](http://github.com/sergeyreznik/metal-ray-tracer/tree/part-1)
 for this post is available on my GitHub page.
@@ -17,7 +17,7 @@ Be sure to select **Objective-C** as language and **Metal** as game technology:
 If everything goes well - you will be able to compile and run application and see colored spinning cube.
 After that we will remove redundant parts of the demo.
 For now we just want to see black screen, usining minimal source code.
-Also don't forget to rename **.m** files to **.mm** the be able to use C++ code.
+Also don't forget to rename **.m** files to **.mm** in toder to be enable C++ code.
 
 After cleaning up the code, your `- (void)drawInMTKView:(nonnull MTKView *)view` should look like this:
 <script type="preformatted">
