@@ -14,12 +14,13 @@ Be sure to select **Objective-C** as language and **Metal** as game technology:
 
 ![](images/pic-1.png)
 
-If everything goes well - you will be able to compile and run application and see colored spinning cube.
+If everything goes well - you will be able to compile and run an application and see a colored spinning cube.
 After that we will remove redundant parts of the demo.
-For now we just want to see black screen, usining minimal source code.
-Also don't forget to rename **.m** files to **.mm** in toder to be enable C++ code.
+For now, we just want to see a black screen, using minimal source code.
+Also, don't forget to rename **.m** files to **.mm** to be able to use C++ in the code.
 
-After cleaning up the code, your `- (void)drawInMTKView:(nonnull MTKView *)view` should look like this:
+After cleaning up the code to only acquire and present current drawable,
+your `- (void)drawInMTKView:(nonnull MTKView *)view` should look like this:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 - (void)drawInMTKView:(nonnull MTKView *)view
@@ -43,17 +44,18 @@ clear or draw to the drawable's texture.
 Adding and testing Metal compute shaders
 ================================================================================
 
-Lets start from writing simple compute shader, which will fill texture with default red/green pattern depening on texture coordinates.
+Let's start with a simple compute shader, which will fill a texture with a default red/green pattern based on texture coordinates.
 We will be using [Default Library](https://developer.apple.com/documentation/metal/mtldevice/1433380-newdefaultlibrary?language=objc)
-so all our `*.metal` files in the Xcode project will be compiled and could be easily accessed.
+so, all our `*.metal` files in the Xcode project will be compiled and could be easily accessed.
 
 Please take a look at [Metal Shading Language Specification](https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf)
 if you have never done this before.
 
-Simplest compute shader for filling image with UV coordinates would look like:
+The simplest compute shader for filling image with UV coordinates should look like:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Obj-C
-kernel void imageFillTest(texture2d<float, access::write> image [[texture(0)]],
+kernel void imageFillTest(
+    texture2d<float, access::write> image [[texture(0)]],
     uint2 coordinates [[thread_position_in_grid]],
     uint2 size [[threads_per_grid]])
 {
@@ -62,13 +64,13 @@ kernel void imageFillTest(texture2d<float, access::write> image [[texture(0)]],
 }
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
-Where `threads_per_grid` attribute specifies dimension of the excution grid and `thread_position_in_grid` attribute
+Where `threads_per_grid` attribute specifies the dimension of the excution grid and `thread_position_in_grid` attribute
 specifies currently executed thread position in the execution grid.
 
 See section **4.3.4.6 Kernel Function Input Attributes** in Metal SL specs for details.
 
-Also we need to create writable texture which we can use as compute shader output, so lets just make it **RGBA32F**.
-Since we want to handle window size changes, lets create (or re-create texture) on window resize. So the best place to do this
+Also we need to create a writable texture that we can use as compute shader output, so let's just make it **RGBA32F**.
+Since we want to handle window size changes, let's create (or re-create texture) on window resize. So the best place to do this
 would be `drawableSizeWillChange` method:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
@@ -92,14 +94,14 @@ would be `drawableSizeWillChange` method:
 Since we are going to use this texture only on GPU we will specify `storageMode` as `MTLStorageModePrivate`.
 And we need to add `MTLTextureUsageShaderWrite` to the texture's usage to be able to write data into it in the compute shader.
 
-Now lets create `MTLComputePipelineState` object and initialize it with our test function. For this I've created helper method
+Now let's create a `MTLComputePipelineState` object and initialize it with our `imageFillTest` function. For this I've created helper method
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 - (id<MTLComputePipelineState>)newComputePipelineWithFunctionName:
     (NSString*)functionName
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
-Which loads `MTLFunction` with specified name from default library and creates `MTLComputePipelineState` object. See its implementation in the source code.
+Which loads a `MTLFunction` with specified name from the default library and creates `MTLComputePipelineState` object. See its implementation in the source code.
 
 Another useful utility method would be the one which actually dispatches specified compute shader:
 <script type="preformatted">
@@ -115,16 +117,16 @@ Another useful utility method would be the one which actually dispatches specifi
 
     [commandEncoder setComputePipelineState:_testComputeShader];
     [commandEncoder dispatchThreads:_outputImageSize
-              threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
+    threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
     [commandEncoder endEncoding];
 }
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 
-So now we are ready to dispatch our test compute shader, which will fill output texture. But we won't see any result on the screen.
-Therefore we need to add a render pipeline, which will basically blit output texture to the drawable's texture so we can see it.
-Lets create a simple vertex and fragment shaders and draw a full screen triangle, it will just copy our float texture to the screen.
-Later this shader could be extended to do tonemapping, comparison with reference images, etc, but for now, blit shaders will be very simple:
+So now we are ready to dispatch our test compute shader, that fills output texture. But we won't see any result on the screen.
+Therefore we need to add a render pipeline, which will basically blit the output texture to the drawable's texture so we can see it.
+Let's create a simple vertex and fragment shaders and draw a full screen triangle, it will just copy our float texture to the screen.
+Later this shader could be extended to do tone mapping, comparison with reference images, etc., but for now, blit shaders will be very simple:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 struct BlitVertexOut
@@ -164,18 +166,18 @@ If everything goes well (and I really hope it is), we will see our texture, fill
 Adding ray-tracing Metal Performance Shaders
 ================================================================================
 
-Now lets add ray-tracing Metal Performance Shaders. For now we will be need only two objects:
+Now let's add ray-tracing Metal Performance Shaders. For now we will be need only two objects:
 - `MPSTriangleAccelerationStructure`
 - `MPSRayIntersector`
 
 Apple's [documentation](https://developer.apple.com/documentation/metalperformanceshaders/mpstriangleaccelerationstructure?language=objc) is being
-very laconic about it and only says:
+very laconic about it and says only:
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ DISABLED
 An acceleration structure built over triangles.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Nevertheless, this is very true :)
 
-`MPSRayIntersector` is basically an object which actually does ray-geometry intersection using acceleration structure.
+`MPSRayIntersector` is basically an object which actually does ray-geometry intersection using an acceleration structure.
 Basically it sets up and dispatches compute shader for that.
 
 Both of them requires only `MTLDevice` upon the creation. Therefore adding ray-tracing Metal Performance Shaders means to create a method:
@@ -194,7 +196,7 @@ Both of them requires only `MTLDevice` upon the creation. Therefore adding ray-t
 
 Tracing one hard-coded triangle
 ================================================================================
-Seems like we get into the most interesting part of the post. Lets hard-code and trace a single triangle.
+Seems like we get into the most interesting part of the post. Let's hard-code and trace a single triangle.
 As soon as we will be able to trace a single triangle things will be much clearer and the rest of ray-tracer will be
 much easier to understand and implement. So, for tracing one triangle we will be need to:
 - create vertex and index buffers for triangle;
@@ -222,7 +224,7 @@ id<MTLBuffer> indexBuffer = [_device newBufferWithBytes:indices
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 
-Now lets build acceleration structure using our vertex and index buffers containing the single triangle.
+Now let'sbuild an acceleration structure using our vertex and index buffers containing the single triangle.
 To make that we just need to setup buffers, their contents size and number of triangles, and just call `rebuild` method:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
@@ -249,7 +251,7 @@ Also we need to setup a ray intersector. It needs to know type of ray and inters
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 
-We will declare structures `Ray` and `Intersection` in the separate header file, which can be included from Objective-C
+We will declare the structures `Ray` and `Intersection` in the separate header file, which can be included from Objective-C
 code as well as from Metal code. For now, we don't need to include any extra data to our structures, so we can just use
 built-in types:
 
@@ -263,7 +265,7 @@ using Intersection = MPSIntersectionDistancePrimitiveIndexCoordinates;
 </script>
 Later we will extend `Ray` structure at least with throughput and radiance values.
 
-Also we need to allocate a buffers on the GPU for rays and interesctions. The amount of memory for this buffers would be
+Also we need to allocate a buffers on the GPU for rays and interesctions. The amount of memory for these buffers would be
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Obj-C
 ray count x sizeof(Ray)
@@ -275,10 +277,11 @@ We can make this buffers located comletely in the GPU memory, since we don't nee
 
 Our last steps would be to write compute shaders for generating rays and handling intersection and dispatch them.
 For this first steps demo we will be using orthographic projection. We will generate one ray per pixel, which starts from
-`(u, v, -1.0)` and goes in `(u, v, 1.0)` direction (remember, our triangle located in XY plane, with `z = 0`):
+`(u, v, -1.0)` and goes in `(u, v, 1.0)` direction (remember, our triangle located in the XY plane, with `z = 0`):
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Obj-C
-kernel void generateRays(device Ray* rays [[buffer(0)]],
+kernel void generateRays(
+    device Ray* rays [[buffer(0)]],
     uint2 coordinates [[thread_position_in_grid]],
     uint2 size [[threads_per_grid]])
 {
@@ -293,19 +296,22 @@ kernel void generateRays(device Ray* rays [[buffer(0)]],
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 After dispatching this compute shader our ray buffer will be filled with rays uniformly distributed in [0..1] coordinates in XY plane.
-Then we just need to feed rays buffer to `MPSRayIntersector` in order to obtain intersections in the separate buffer we created before:
+Then we just need to feed rays buffer to `MPSRayIntersector` and the intersections will be outputted to the separate buffer we created before:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Obj-C
 [_rayIntersector encodeIntersectionToCommandBuffer:commandBuffer
-    intersectionType:MPSIntersectionTypeNearest
-    rayBuffer:_rayBuffer rayBufferOffset:0
-    intersectionBuffer:_intersectionBuffer intersectionBufferOffset:0
-    rayCount:_rayCount accelerationStructure:_accelerationStructure];
+                                  intersectionType:MPSIntersectionTypeNearest
+                                         rayBuffer:_rayBuffer
+                                   rayBufferOffset:0
+                                intersectionBuffer:_intersectionBuffer
+                          intersectionBufferOffset:0
+                                          rayCount:_rayCount
+                             accelerationStructure:_accelerationStructure];
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 Here we are asking to find nearest intersection and fill intersection structures with distance, primitive index and
 the barycentric coordinates of the hit point, if we actually hit our triangle. Therefore, handling intersection
-in our case would be also quite straightforward - if we hit triangle, lets write barycentric coordinates,
+in our case would be also quite straightforward - if we hit triangle, let'swrite barycentric coordinates,
 encoded as color to the output image:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Obj-C
@@ -329,7 +335,7 @@ kernel void handleIntersections(
 And if everything went well, we will see a colored triangle over our test image:
 ![](images/pic-3.png)
 
-**Thats it!**
+**That’s it!**
 
 [Return to the index](../index.html)
 
