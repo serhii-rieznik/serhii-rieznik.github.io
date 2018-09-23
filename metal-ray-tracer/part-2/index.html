@@ -1,0 +1,195 @@
+<meta charset="utf-8">
+**Implementing diffuse BRDF**
+
+In the [first post](../part-1/index.html) we've prepared an environment and
+traced our first triangle using Metal Performance shaders.
+
+Here I will describe how to load geometry from .OBJ file using
+[https://github.com/syoyo/tinyobjloader](tinyobjloader)
+and implement simple diffuse BRDF with next event estimation.
+
+[Source Code](http://github.com/sergeyreznik/metal-ray-tracer/tree/part-2)
+for this post is also available on my GitHub page.
+
+Loading .OBJ file into the ray-tracer
+======================================================================
+As soon as we can trace a single triangle we are not actually limited to any number of triangles.
+We just need to provide proper vertices and indices to the ray-tracer.
+So let's load classic Cornell Box scene and trace it.
+
+In the first post we've described our vertices as
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+struct Vertex { float x, y, z, w; }
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+Let's now extend it to have normals and texture coordinates. We will be using `packed_float3`
+for positions and normals and `packed_float2` for texture coordinates:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+#include <MetalPerformanceShaders/MetalPerformanceShaders.h>
+
+#if !defined(__METAL_VERSION__)
+using packed_float3 = MPSPackedFloat3;
+#endif
+
+struct Vertex
+{
+    packed_float3 v;
+    packed_float3 n;
+    packed_float2 t;
+};
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Also let's add a simple class called `Geometry Provider` which will load files and create vertex and index buffers.
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+class GeometryProvider
+{
+public:
+    void loadFile(const std::string&, id<MTLDevice>);
+
+    id<MTLBuffer> indexBuffer() const { return _indexBuffer; }
+    id<MTLBuffer> vertexBuffer() const { return _vertexBuffer; }
+    uint32_t triangleCount() const { return _triangleCount; }
+
+private:
+    ...
+};
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Inside we will be using `tinyobjloader` to actually load file or return a placeholder triangle
+from the first post in case something went wrong and file was not loaded.
+
+`tinyobjloader` loads .obj file as a vector of `tinyobj::shape_t` types for geometry and
+a vector of `tinyobj::material_t` for materials. Let's just go through this vectors and
+extract data to linear array of our vertices. In the end we will have a vector of `Vertex`
+structures and an index buffer, containing indices (0, 1, 2, ..., N), where `N` equals to `3 x (Number of triangles)`.
+So now we are ready to load and fill vertex/index buffers with contents of .obj file:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+std::vector<Vertex> vertices;
+std::vector<uint32_t> indices;
+// ...
+// load .obj file
+// ...
+_vertexBuffer = [device newBufferWithBytes:vertices.data()
+    length:sizeof(Vertex) * vertices.size() options:MTLResourceStorageModeManaged];
+
+_indexBuffer = [device newBufferWithBytes:indices.data()
+    length:sizeof(uint32_t) * indices.size() options:MTLResourceStorageModeManaged];
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+For now we will not bother ourselves with staging buffers (to put contents directly into the GPU memory) and just use
+[MTLResourceStorageModeManaged](https://developer.apple.com/documentation/metal/mtlresourceoptions/mtlresourcestoragemodemanaged)
+option for our buffer contents.
+
+Everything is set up for the tracing Cornell box. But we need to modify our ray generator shader,
+because in the first post we just used simple orthographic projection.
+Now we want some kind of pinhole camera to look at our model. So instead of generating rays uniformly in [0..1] space,
+we will send them from one point. For now let's not bother ourselves with implementing physically-based
+camera or even FOV settings and throw rays form the origin in the direction computed as:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+kernel void generateRays(device Ray* rays [[buffer(0)]],
+    uint2 coordinates [[thread_position_in_grid]],
+    uint2 size [[threads_per_grid]])
+{
+    const float3 origin = float3(0.0f, 1.0f, 2.1f);
+
+    float aspect = float(size.x) / float(size.y);
+    float2 uv = float2(coordinates) / float2(size - 1) * 2.0f - 1.0f;
+
+    float3 direction = normalize(float3(aspect * uv.x, uv.y, -1.0f));
+
+    uint rayIndex = coordinates.x + coordinates.y * size.x;
+    rays[rayIndex].origin = origin;
+    rays[rayIndex].direction = direction;
+    rays[rayIndex].minDistance = 0.0f;
+    rays[rayIndex].maxDistance = INFINITY;
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Having the same intersection kernel as in the first post (which outputs color encoded barycentric coordinates),
+we will get the left image. Visualizing primitive index in the intersection will give us the right image:
+![Visualizing barycentric coordinates](images/pic-1.png)![Visualizing primitive index](images/pic-2.png)
+
+Adding materials
+======================================================================
+Now it is time to exploit primitive index property of the intersection.
+Let's make an array of materials loaded from the .obj file available in the intersection shader
+and sample material's diffuse color.
+
+We will start start from declaring out `Material` structure, which will be extended later, but for now will hold
+diffuse and emissive colors with material type property (for now either `MATERIAL_DIFFUSE` or `MATERIAL_LIGHT`).
+We will be need emissive color and `MATERIAL_LIGHT` type for light sources
+because we going to implement "glowing" triangles, rather than analytical light sources (like point/sphere/area/etc.).
+
+Also we will be using another array of `Triangle` structures, which for now will hold only material index and
+later will be extended with area and probability properties, which will be utilized in the event estimation.
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+struct Material
+{
+    packed_float3 diffuse;
+    uint type = MATERIAL_DIFFUSE;
+
+    packed_float3 emissive;
+};
+
+struct Triangle
+{
+    uint materialIndex;
+};
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+It is time to update our intersection shader to sample material index and materials properties:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+kernel void handleIntersections(
+    texture2d<float, access::write> image [[texture(0)]],
+    device const Intersection* intersections [[buffer(0)]],
+    device const Material* materials [[buffer(1)]],
+    device const Triangle* triangles [[buffer(2)]],
+    uint2 coordinates [[thread_position_in_grid]],
+    uint2 size [[threads_per_grid]])
+{
+    uint rayIndex = coordinates.x + coordinates.y * size.x;
+    device const Intersection& i = intersections[rayIndex];
+    if (i.distance < DISTANCE_EPSILON)
+        return;
+
+    device const Triangle& triangle = triangles[i.primitiveIndex];
+    device const Material& material = materials[triangle.materialIndex];
+    image.write(float4(material.diffuse, 1.0), coordinates);
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+![Let's also remove colored background](images/pic-3.png)
+The light source on the ceiling is black, becase it does not contain diffuse component, just emissive.
+
+Adding some noise
+======================================================================
+Bla-bla-bla
+
+Accumulating image
+======================================================================
+Bla-bla-bla
+
+Sampling light sources
+======================================================================
+Bla-bla-bla
+
+[Return to the index](../index.html)
+
+<!-- Markdeep: -->
+<style class="fallback">body{visibility:hidden;white-space:pre;font-family:monospace}</style>
+<script src="markdeep.min.js"></script>
+<script src="https://casual-effects.com/markdeep/latest/markdeep.min.js"></script>
+<script>window.alreadyProcessedMarkdeep||(document.body.style.visibility="visible")</script>
