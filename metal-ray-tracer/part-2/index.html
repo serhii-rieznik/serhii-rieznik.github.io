@@ -15,7 +15,7 @@ Loading .OBJ file into the ray-tracer
 ======================================================================
 As soon as we can trace a single triangle we are not actually limited to any number of triangles.
 We just need to provide proper vertices and indices to the ray-tracer.
-So let's load classic Cornell Box scene and trace it.
+So, let's load classic Cornell Box scene and trace it.
 
 In the first post we've described our vertices as
 
@@ -43,7 +43,7 @@ struct Vertex
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 
-Also let's add a simple class called `Geometry Provider` which will load files and create vertex and index buffers.
+Also, let's add a simple class called `Geometry Provider` which will load files and create vertex and index buffers.
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 class GeometryProvider
@@ -65,7 +65,7 @@ Inside we will be using `tinyobjloader` to actually load file or return a placeh
 from the first post in case something went wrong and file was not loaded.
 
 `tinyobjloader` loads .obj file as a vector of `tinyobj::shape_t` types for geometry and
-a vector of `tinyobj::material_t` for materials. Let's just go through this vectors and
+a vector of `tinyobj::material_t` for materials. Let's just go through these vectors and
 extract data to linear array of our vertices. In the end we will have a vector of `Vertex`
 structures and an index buffer, containing indices (0, 1, 2, ..., N), where `N` equals to `3 x (Number of triangles)`.
 So now we are ready to load and fill vertex/index buffers with contents of .obj file:
@@ -84,14 +84,14 @@ _indexBuffer = [device newBufferWithBytes:indices.data()
     length:sizeof(uint32_t) * indices.size() options:MTLResourceStorageModeManaged];
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
-For now we will not bother ourselves with staging buffers (to put contents directly into the GPU memory) and just use
+For now, we will not bother ourselves with staging buffers (to put contents directly into the GPU memory) and just use
 [MTLResourceStorageModeManaged](https://developer.apple.com/documentation/metal/mtlresourceoptions/mtlresourcestoragemodemanaged)
 option for our buffer contents.
 
 Everything is set up for the tracing Cornell box. But we need to modify our ray generator shader,
 because in the first post we just used simple orthographic projection.
 Now we want some kind of pinhole camera to look at our model. So instead of generating rays uniformly in [0..1] space,
-we will send them from one point. For now let's not bother ourselves with implementing physically-based
+we will send them from one point. For now, let's not bother ourselves with implementing physically-based
 camera or even FOV settings and throw rays form the origin in the direction computed as:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
@@ -130,7 +130,7 @@ diffuse and emissive colors with material type property (for now either `MATERIA
 We will be need emissive color and `MATERIAL_LIGHT` type for light sources
 because we going to implement "glowing" triangles, rather than analytical light sources (like point/sphere/area/etc.).
 
-Also we will be using another array of `Triangle` structures, which for now will hold only material index and
+Also, we will be using another array of `Triangle` structures, which for now will hold only material index and
 later will be extended with area and probability properties, which will be utilized in the event estimation.
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
@@ -176,15 +176,463 @@ The light source on the ceiling is black, becase it does not contain diffuse com
 
 Adding some noise
 ======================================================================
-Bla-bla-bla
+In order to perform Monte-Carlo integration we will be need to have random values. We going to use them in
+light sampling, antialiasing, etc. Usual way to obtain random values in the shader is to have tiled noise texture.
+But instead we will use buffer of `float4` with random values inside. Advantage of such appoarch is that buffer is more
+flexible and can easily be extended to contain more values, or even have more dimensions.
+Later, we will replace random values with low discrepancy sequence, but for now let's just fill our buffer with random values.
+We will be doing this each frame, and since we have three frames - we will be need three buffers, each will be updated
+in it's frame. So, let's declare three buffers and new variable, holding frame index:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+id<MTLBuffer> _noise[MaxFrames];
+uint32_t _frameIndex;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+and then update buffers each frame:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+- (void)updateBuffers
+{
+    static std::mt19937 randomGenerator;
+    static std::uniform_real_distribution<float>
+        uniformFloatDistribution(0.0f, 1.0f);
+
+    vector_float4* ptr =
+        reinterpret_cast<vector_float4*>([_noise[_frameIndex] contents]);
+
+    for (NSUInteger i = 0; i < (NOISE_BLOCK_SIZE * NOISE_BLOCK_SIZE); ++i)
+    {
+        ptr->x = uniformFloatDistribution(randomGenerator);
+        ptr->y = uniformFloatDistribution(randomGenerator);
+        ptr->z = uniformFloatDistribution(randomGenerator);
+        ptr->w = uniformFloatDistribution(randomGenerator);
+        ++ptr;
+    }
+
+    [_noise[_frameIndex]
+        didModifyRange:NSMakeRange(0, [_noise[_frameIndex] length])];
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
 
 Accumulating image
 ======================================================================
-Bla-bla-bla
+The first usage of the noise buffer would be to implement anti-aliasing. We will slightly jitter each ray's direction each
+frame in the ray generation shader, so now it will look like:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+kernel void generateRays(
+    device Ray* rays [[buffer(0)]],
+    device vector_float4* noise [[buffer(1)]],
+    uint2 coordinates [[thread_position_in_grid]],
+    uint2 size [[threads_per_grid]])
+{
+    const float3 origin = float3(0.0f, 1.0f, 2.35f);
+
+    uint noiseSampleIndex = (coordinates.x % NOISE_BLOCK_SIZE) +
+        NOISE_BLOCK_SIZE * (coordinates.y % NOISE_BLOCK_SIZE);
+
+    device const float4& noiseSample = noise[noiseSampleIndex];
+
+    float aspect = float(size.y) / float(size.x);
+    float2 uv = float2(coordinates) / float2(size - 1) * 2.0f - 1.0f;
+    float2 rnd = (noiseSample.xy * 2.0 - 1.0) / float2(size - 1);
+    float3 direction = float3((uv.x + rnd.x), aspect * (uv.y + rnd.y), -1.0f);
+
+    uint rayIndex = coordinates.x + coordinates.y * size.x;
+    rays[rayIndex].base.origin = origin;
+    rays[rayIndex].base.direction = normalize(direction);
+    rays[rayIndex].base.minDistance = DISTANCE_EPSILON;
+    rays[rayIndex].base.maxDistance = INFINITY;
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+Where `NOISE_BLOCK_SIZE` will define a size of the noise buffer in one dimension (i.e total buffer size would be
+`NOISE_BLOCK_SIZE * NOISE_BLOCK_SIZE`).
+
+Now, we need to average images over the time in order to get smooth, anti-aliased edges.
+For this purpose, we will be need to add a new stage to our ray-tracing pipeline, where we will read stored value in the
+output image and update it with a new frame. Also, in this shader we should know current frame index,
+and if this is the very first frame - just store store obtained results in the output image, rather than averaging them.
+
+So, there would be two major changes now:
+1. a new kernel for the image accumulation;
+2. modification to our ray structure in order to store radiance along this ray;
+3. remove any direct writes to the output texture from the ray-tracing kernel(s).
+
+Let's add a radiace value to our ray structure, so now it will look like:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+struct Ray
+{
+    MPSRayOriginMinDistanceDirectionMaxDistance base;
+    packed_float3 radiance;
+};
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+And rather than writing diffuse color of the material to the output image in `handleIntersections` kernel,
+we will store this value in the ray's radiance field.
+
+Now, lets add a new compute shader, which will accumulate image. But before this we need to add a new buffer which
+will store frame index for now and later could be extended with a specific application's data.
+Similar to the noise buffers we will have three of them for each frame, and update together with the noise.
+On the CPU side we will also have frame counter:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+struct ApplicationData
+{
+    uint frameIndex;
+};
+
+...
+
+- (void)updateBuffers
+{
+    vector_float4* ptr =
+        reinterpret_cast<vector_float4*>([_noise[_frameIndex] contents]);
+
+    for (NSUInteger i = 0; i < (NOISE_BLOCK_SIZE * NOISE_BLOCK_SIZE); ++i)
+    {
+        ptr->x = uniformFloatDistribution(randomGenerator);
+        ptr->y = uniformFloatDistribution(randomGenerator);
+        ptr->z = uniformFloatDistribution(randomGenerator);
+        ptr->w = uniformFloatDistribution(randomGenerator);
+        ++ptr;
+    }
+    [_noise[_frameIndex]
+        didModifyRange:NSMakeRange(0, [_noise[_frameIndex] length])];
+
+    ApplicationData* appData =
+        reinterpret_cast<ApplicationData*>([_appData[_frameIndex] contents]);
+
+    appData->frameIndex = _frameContinuousIndex;
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+Now everything is prepared to have an anti-aliased image: we have the noise buffers and all required information, also
+rays now store radiance value, so we can process them after the actual ray-tracing routines. We just need to add a new
+kernel, which will read from and write back to the output image:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+#define ENABLE_ACCUMULATION 1
+
+kernel void accumulateImage(
+    texture2d<float, access::read_write> image [[texture(0)]],
+    device Ray* rays [[buffer(0)]],
+    constant ApplicationData& appData [[buffer(1)]],
+    uint2 coordinates [[thread_position_in_grid]],
+    uint2 size [[threads_per_grid]])
+{
+    uint rayIndex = coordinates.x + coordinates.y * size.x;
+    float4 outputColor = float4(rays[rayIndex].radiance, 1.0);
+#if (ENABLE_ACCUMULATION)
+    if (appData.frameIndex > 0)
+    {
+        float4 storedColor = image.read(coordinates);
+        float t = float(appData.frameIndex) / float(appData.frameIndex + 1);
+        outputColor = mix(outputColor, storedColor, t);
+    }
+#endif
+    image.write(outputColor, coordinates);
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+Running this kernel after the ray-tracing will produce a smooth image:
+
+![](images/pic-4.png)
+
+Adding shadows
+======================================================================
+Now, when most of the helpers and support methods are implemented we can start playing with lighting and shadows.
+
+Let's start from casting a shadow rays in the direction of light source (remember, we only have glowing triangles)
+and if we hit one - assume the origin of such ray to be lit, otherwise it is in the shadow.
+In order to do this, we will be need to:
+- collect all glowing triangles;
+- sample one of them in the main intersection handler kernel;
+- sample random point inside selected emitter triangle;
+- fill a new buffer with shadow rays;
+- intersect shadow rays with the geometry we already have;
+- process intersection and determine whether point from which we casted our shadow ray is lit.
+
+Let's start from collecting all glowing triangles. It is pretty easy to do, because we already processing loaded geometry.
+We will just put triangles with emissive material to the separate buffer. But before we do this -
+let's declare our EmitterTriangle structure:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+struct EmitterTriangle
+{
+    float area;
+    float cdf;
+    float pdf;
+    uint globalIndex;
+    Vertex v0;
+    Vertex v1;
+    Vertex v2;
+};
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+Vertices will be used for sampling point inside a triangle. We will use globalIndex (i.e index of the glowing
+triangle among other all scene's triangles) to determine if we really it it in the shadow intersection handler.
+`probability distribution function (pdf)` and `cumulative distribution function (cdf)` will be used to randomly sample
+one of the emitter triangles, and area will be used later for sampling light sources. Let's now fill a buffer with
+this stuctures on the CPU side:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+totalLightArea = 0.0f;
+...
+// iterate over all triangles
+const Material& material = ...
+if (simd_length(material.emissive) > 0.0f)
+{
+    emitterTriangleBuffer.emplace_back();
+    emitterTriangleBuffer.back().area = area;
+    emitterTriangleBuffer.back().globalIndex = globalTriangleIndex;
+    emitterTriangleBuffer.back().v0 = v0;
+    emitterTriangleBuffer.back().v1 = v1;
+    emitterTriangleBuffer.back().v2 = v2;
+    totalLightArea += area;
+}
+...
+// sort emitter triangles from smallest to largest
+std::stable_sort(std::begin(emitterTriangleBuffer), std::end(emitterTriangleBuffer),
+    [](const EmitterTriangle& l, const EmitterTriangle& r){
+    return l.area < r.area;
+});
+
+// compute pdf and cdf for each triangle
+float cdf = 0.0f;
+for (EmitterTriangle& t : emitterTriangleBuffer)
+{
+    t.cdf = cdf;
+    t.pdf = t.area / totalLightArea;
+    cdf += t.pdf;
+}
+// add one dummy triangle with cdf = 1.0f to the back of the list
+// this will be used for randomly sample one triangle
+emitterTriangleBuffer.emplace_back();
+emitterTriangleBuffer.back().cdf = 1.0f;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Now we need to sample one triangle from this array. Here I will provide a brief description and code for the sampling.
+For details please refer to section **13.3** (SAMPLING RANDOM VARIABLES) in the **PBRT book**.
+
+We have an array of triangles, each having cdf value larger than previous one, so having random value ξ,
+we can sample one these triangles according to it's probability (which is nothing but area of the triangle
+divided by total area of all triangles). It means that with uniform distributiuon of the random values we will
+more likely select larger triangles than smaller ones. In order to sample triangle, we need to iterate over them
+and find one with cdf value not larger than our random value ξ:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+device const EmitterTriangle& sampleEmitterTriangle(
+    device const EmitterTriangle* triangles, uint triangleCount, float xi)
+{
+    uint index = 0;
+    for (; (index < triangleCount) && (triangles[index + 1].cdf <= xi); ++index);
+    return triangles[index];
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+Notice `triangles[index + 1].cdf` here. This why we added a dummy triangle with cdf equals to one to the end of the list.
+If ξ will be equal to one - last triangle in the array will be selected.
+
+Now, having one sampled triangle we can choose a random point within it. We will be need another two random values
+(luckily, we have 4-component floats in our noise array). In order to select a random point inside triangle we need to
+generate a random barycentric coordinates and interplolate triangle vertices to obtain a point. Converting random values
+to the barycentric coordinates looks like:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+float3 barycentric(float2 smp)
+{
+    float r1 = sqrt(smp.x);
+    float r2 = smp.y;
+    return float3(1.0f - r1, r1 * (1.0f - r2), r1 * r2);
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Everything seems to be prepared for generating a shadow rays. And in the main intersection handler we will
+determine an exact position of the intersection and cast a ray from this position to randomly selected point within
+randomly selected triangle. Of course, we need to add more buffers as a parameters to our `handleIntersections` kernel.
+We will require access to vertex and index buffers, as well as to the emitter triangles and light sampling rays buffer.
+Pretty impressive list of the parameters:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+kernel void handleIntersections(
+    device const Intersection* intersections [[buffer(0)]],
+    device const Material* materials [[buffer(1)]],
+    device const Triangle* triangles [[buffer(2)]],
+    device const EmitterTriangle* emitterTriangles [[buffer(3)]],
+    device const Vertex* vertices [[buffer(4)]],
+    device packed_uint3* indices [[buffer(5)]],
+    device const float4* noise [[buffer(6)]],
+    device Ray* rays [[buffer(7)]],
+    device LightSamplingRay* lightSamplingRays [[buffer(8)]],
+    constant ApplicationData& appData [[buffer(9)]],
+    uint2 coordinates [[thread_position_in_grid]],
+    uint2 size [[threads_per_grid]])
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+At first, we will determine an exact position of the intersection:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+uint rayIndex = coordinates.x + coordinates.y * size.x;
+device const Intersection& i = intersections[rayIndex];
+...
+device const packed_uint3& triangleIndices = indices[i.primitiveIndex];
+device const Vertex& a = vertices[triangleIndices.x];
+device const Vertex& b = vertices[triangleIndices.y];
+device const Vertex& c = vertices[triangleIndices.z];
+Vertex currentVertex = interpolate(a, b, c, i.coordinates);
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Now, let's sample a triangle and a vertex inside:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+device const EmitterTriangle& emitterTriangle = sampleEmitterTriangle(
+    emitterTriangles, appData.emitterTrianglesCount, noiseSample.x);
+
+float3 lightTriangleBarycentric = barycentric(noiseSample.yz);
+Vertex lightVertex = interpolate(emitterTriangle.v0, emitterTriangle.v1,
+    emitterTriangle.v2, lightTriangleBarycentric);
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+And generate shadow ray:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+packed_float3 directionToLight = normalize(lightVertex.v - currentVertex.v);
+
+lightSamplingRays[rayIndex].base.origin =
+    currentVertex.v + currentVertex.n * DISTANCE_EPSILON;
+lightSamplingRays[rayIndex].base.direction = directionToLight;
+lightSamplingRays[rayIndex].base.minDistance = 0.0f;
+lightSamplingRays[rayIndex].base.maxDistance = INFINITY;
+lightSamplingRays[rayIndex].targetPrimitiveIndex = emitterTriangle.globalIndex;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+On the CPU side we will be need to add another ray intersector object and encode it to the command buffer,
+finding intersections of shadow rays with existing geometry (using existing acceleration structure):
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+_lightIntersector = [[MPSRayIntersector alloc] initWithDevice:_device];
+[_lightIntersector
+    setRayDataType:MPSRayDataTypeOriginMinDistanceDirectionMaxDistance];
+[_lightIntersector
+    setRayStride:sizeof(LightSamplingRay)];
+[_lightIntersector
+    setIntersectionDataType:MPSIntersectionDataTypeDistancePrimitiveIndex];
+[_lightIntersector
+    setIntersectionStride:sizeof(LightSamplingIntersection)];
+
+...
+
+[_lightIntersector encodeIntersectionToCommandBuffer:commandBuffer
+    intersectionType:MPSIntersectionTypeNearest
+    rayBuffer:_lightSamplingRayBuffer
+    rayBufferOffset:0
+    intersectionBuffer:_lightSamplingIntersectionBuffer
+    intersectionBufferOffset:0
+    rayCount:_rayCount
+    accelerationStructure:_accelerationStructure];
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Also, we need to add a new kernel, which will be handling intersections of the shadow rays with geometry. For now, it
+will be pretty straightforward - determine if we really hit a triangle we supposed to, and if yes -
+just add one to the original ray's radiance value:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+kernel void lightSamplingHandler(
+    device const LightSamplingIntersection* intersections [[buffer(0)]],
+    device const LightSamplingRay* lightSamplingRays [[buffer(1)]],
+    device Ray* rays [[buffer(2)]],
+    uint2 coordinates [[thread_position_in_grid]],
+    uint2 size [[threads_per_grid]])
+{
+    uint rayIndex = coordinates.x + coordinates.y * size.x;
+    if (intersections[rayIndex].primitiveIndex == lightSamplingRays[rayIndex].targetPrimitiveIndex)
+    {
+        rays[rayIndex].radiance += 1.0f;
+    }
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Putting everything together and launching our ray-tracer will give us nice image with shadows
+(not taking materials into account for now):
+
+![](images/pic-5.png)
 
 Sampling light sources
 ======================================================================
-Bla-bla-bla
+Final step for this post would be to implement correct light sampling.
+Please refer to the section **14.2** (SAMPLING LIGHT SOURCES) of the **PBRT book** for more theory.
+Here we will be sampling area lights (each emitter triangle considered as a separate light source in our case).
+
+Luckily, most of the changes will be only on GPU side (in kernels), but we need to add emissive value to the
+EmitterTriangle structure, so we can actually know it's luminance. Also, we will add a `throughput` value to the
+light sampling ray structure, and in case of successfull intersection will add it to the main ray's radiance.
+
+Basically, we already have light sampling, we just need to do it more carefully and physically-based. For this we have to
+determine a probability of sampling specific point inside specific triangle. Also, we need to take into account surface's
+BSDF, but for now we will assume that all surfaces are perfectly diffuse and have Lambert BSDF (`1/π`).
+Since we alreay selected a point on the emitter triangle, we can easily determine BSDF value as:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+float materialBsdf = (1.0 / PI) * dot(directionToLight, currentVertex.n);
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+Probability of sampling triangle and point inside it accounts discrete probability and probability of sampling point
+with respect to solid angle (see section **14.2.2** (SAMPLING SHAPES) of the **PBRT book** for great details).
+The former we already have in our emitter triangle (remember pdf field), the latter is determined as:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+float cosTheta = -dot(directionToLight, lightVertex.n);
+float pointSamplePdf = (distanceToLight * distanceToLight) /
+    (emitterTriangle.area * cosTheta)
+
+// final probability would be then:
+float lightSamplePdf = emitterTriangle.pdf * pointSamplePdf;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Taking into the account material diffuse color and emissive property of the light, the throughput of the light sampling
+ray would be:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+lightSamplingRays[rayIndex].throughput =
+    emitterTriangle.emissive * material.diffuse * (materialBsdf / lightSamplgPdf);
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Putting everything together and running our small ray-tracer will give us an image:
+
+![](images/pic-6.png)
+
+Wait, why it is so dark? What did we miss? Of course, we forget to enable sRGB conversion :)
+Let's do this in the GameViewController, by setting view's `colorPixelFormat` property:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+_view = (MTKView*)self.view;
+...
+_view.colorPixelFormat = MTLPixelFormatBGRA8Unorm_sRGB;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Now it is much better:
+
+![](images/pic-7.png)
+
+And actually, this is very close to the image produced by [Mitsuba](https://www.mitsuba-renderer.org)
+(I've included test scene for Mitsuba in the `media/reference` folder).
+
+**That's it!**
 
 [Return to the index](../index.html)
 
