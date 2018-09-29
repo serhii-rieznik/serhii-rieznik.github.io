@@ -1,4 +1,4 @@
-<meta charset="utf-8">
+﻿<meta charset="utf-8">
 **Implementing diffuse BRDF**
 
 In the [first post](../part-1/index.html) we've prepared an environment and
@@ -43,7 +43,7 @@ struct Vertex
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 
-Also, let's add a simple class called `Geometry Provider` which will load files and create vertex and index buffers.
+Also, let's add a simple class called `GeometryProvider` which will load files and create vertex and index buffers.
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 class GeometryProvider
@@ -78,21 +78,23 @@ std::vector<uint32_t> indices;
 // load .obj file
 // ...
 _vertexBuffer = [device newBufferWithBytes:vertices.data()
-    length:sizeof(Vertex) * vertices.size() options:MTLResourceStorageModeManaged];
+    length:sizeof(Vertex) * vertices.size() 
+    options:MTLResourceStorageModeManaged];
 
 _indexBuffer = [device newBufferWithBytes:indices.data()
-    length:sizeof(uint32_t) * indices.size() options:MTLResourceStorageModeManaged];
+    length:sizeof(uint32_t) * indices.size() 
+    options:MTLResourceStorageModeManaged];
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 For now, we will not bother ourselves with staging buffers (to put contents directly into the GPU memory) and just use
 [MTLResourceStorageModeManaged](https://developer.apple.com/documentation/metal/mtlresourceoptions/mtlresourcestoragemodemanaged)
 option for our buffer contents.
 
-Everything is set up for the tracing Cornell box. But we need to modify our ray generator shader,
-because in the first post we just used simple orthographic projection.
-Now we want some kind of pinhole camera to look at our model. So instead of generating rays uniformly in [0..1] space,
-we will send them from one point. For now, let's not bother ourselves with implementing physically-based
-camera or even FOV settings and throw rays form the origin in the direction computed as:
+Everything is set up for the tracing Cornell box. But we need to modify our ray generator shader, because in the first post
+we just used simple orthographic projection. Now we want some kind of pinhole camera to look at our model. 
+So instead of generating parellel rays uniformly in [0..1] space, we will send them from one point. For now, let's not bother 
+ourselves with implementing physically-based camera or even FOV settings. So we will throw rays from the one constant position,
+and their directions will be computed as:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 kernel void generateRays(device Ray* rays [[buffer(0)]],
@@ -116,22 +118,22 @@ kernel void generateRays(device Ray* rays [[buffer(0)]],
 </script>
 
 Having the same intersection kernel as in the first post (which outputs color encoded barycentric coordinates),
-we will get the left image. Visualizing primitive index in the intersection will give us the right image:
+we will get the left image. Visualizing the primitive index of the intersection point will give us the right image:
 ![Visualizing barycentric coordinates](images/pic-1.png)![Visualizing primitive index](images/pic-2.png)
 
 Adding materials
 ======================================================================
 Now it is time to exploit primitive index property of the intersection.
-Let's make an array of materials loaded from the .obj file available in the intersection shader
-and sample material's diffuse color.
+Let's make the array of materials loaded from the .obj file available in the intersection shader
+and read the material's diffuse color.
 
-We will start start from declaring out `Material` structure, which will be extended later, but for now will hold
+We will start from declaring our `Material` structure, which will be extended later, but for now will hold
 diffuse and emissive colors with material type property (for now either `MATERIAL_DIFFUSE` or `MATERIAL_LIGHT`).
 We will be need emissive color and `MATERIAL_LIGHT` type for light sources
 because we going to implement "glowing" triangles, rather than analytical light sources (like point/sphere/area/etc.).
 
 Also, we will be using another array of `Triangle` structures, which for now will hold only material index and
-later will be extended with area and probability properties, which will be utilized in the event estimation.
+later will be extended with area and probability properties, which will be utilized in the next event estimation.
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 struct Material
@@ -171,18 +173,20 @@ kernel void handleIntersections(
 }
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
-![Let's also remove colored background](images/pic-3.png)
+![](images/pic-3.png)
 The light source on the ceiling is black, becase it does not contain diffuse component, just emissive.
+Also we don't need a test compute shader which fills the screen with colored pattern, so let's remove it.
 
 Adding some noise
 ======================================================================
-In order to perform Monte-Carlo integration we will be need to have random values. We going to use them in
+In order to perform Monte-Carlo integration we will need to have random values. We are going to use them in
 light sampling, antialiasing, etc. Usual way to obtain random values in the shader is to have tiled noise texture.
 But instead we will use buffer of `float4` with random values inside. Advantage of such appoarch is that buffer is more
 flexible and can easily be extended to contain more values, or even have more dimensions.
 Later, we will replace random values with low discrepancy sequence, but for now let's just fill our buffer with random values.
-We will be doing this each frame, and since we have three frames - we will be need three buffers, each will be updated
-in it's frame. So, let's declare three buffers and new variable, holding frame index:
+We will be doing this each frame, and since we are using [tripple buffering](https://developer.apple.com/library/archive/documentation/3DDrawing/Conceptual/MTLBestPracticesGuide/TripleBuffering.html) 
+by default, we will be need three nosie buffers, each will be updated in it's frame. 
+So, let's declare three buffers and new variable, holding the frame index:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 id<MTLBuffer> _noise[MaxFrames];
@@ -277,7 +281,7 @@ we will store this value in the ray's radiance field.
 Now, lets add a new compute shader, which will accumulate image. But before this we need to add a new buffer which
 will store frame index for now and later could be extended with a specific application's data.
 Similar to the noise buffers we will have three of them for each frame, and update together with the noise.
-On the CPU side we will also have frame counter:
+On the CPU side we will also have a frame counter:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 struct ApplicationData
@@ -312,7 +316,14 @@ struct ApplicationData
 </script>
 Now everything is prepared to have an anti-aliased image: we have the noise buffers and all required information, also
 rays now store radiance value, so we can process them after the actual ray-tracing routines. We just need to add a new
-kernel, which will read from and write back to the output image:
+kernel, which will read data from the output image, linearly interpolate it with the current frame and store updated value. 
+
+Since every frame should have equal weight in the output image, we will compute weight of the stored data as:
+
+`t = frameIndex / (frameIndex + 1)`
+
+Which will give us 0 in the first frame (stored data is not affecting output), 1/2 in the second frame (new frame will have equal weight), 
+2/3 in the third frame (new frame will have 1/3 weight), and so on.
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 #define ENABLE_ACCUMULATION 1
@@ -338,7 +349,7 @@ kernel void accumulateImage(
 }
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
-Running this kernel after the ray-tracing will produce a smooth image:
+Running this kernel after the ray-tracing will produce an anti-aliased image:
 
 ![](images/pic-4.png)
 
@@ -346,7 +357,7 @@ Adding shadows
 ======================================================================
 Now, when most of the helpers and support methods are implemented we can start playing with lighting and shadows.
 
-Let's start from casting a shadow rays in the direction of light source (remember, we only have glowing triangles)
+Let's start from casting shadow rays in the direction of light source (remember, we only have glowing triangles)
 and if we hit one - assume the origin of such ray to be lit, otherwise it is in the shadow.
 In order to do this, we will be need to:
 - collect all glowing triangles;
@@ -374,34 +385,32 @@ struct EmitterTriangle
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 Vertices will be used for sampling point inside a triangle. We will use globalIndex (i.e index of the glowing
-triangle among other all scene's triangles) to determine if we really it it in the shadow intersection handler.
+triangle among other all scene's triangles) to determine if we really hit it in the shadow intersection handler.
 `probability distribution function (pdf)` and `cumulative distribution function (cdf)` will be used to randomly sample
 one of the emitter triangles, and area will be used later for sampling light sources. Let's now fill a buffer with
-this stuctures on the CPU side:
+this stuctures on the CPU side. 
+At first, for each triangle we will check if it's material is emissive and add it to the list of emissive triangles:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
-totalLightArea = 0.0f;
 ...
-// iterate over all triangles
-const Material& material = ...
-if (simd_length(material.emissive) > 0.0f)
+if (simd_length(triangleMaterial.emissive) > 0.0f)
 {
     emitterTriangleBuffer.emplace_back();
-    emitterTriangleBuffer.back().area = area;
-    emitterTriangleBuffer.back().globalIndex = globalTriangleIndex;
-    emitterTriangleBuffer.back().v0 = v0;
-    emitterTriangleBuffer.back().v1 = v1;
-    emitterTriangleBuffer.back().v2 = v2;
-    totalLightArea += area;
+    emitterTriangleBuffer.back().area = triangleArea;
+	...
+    totalLightArea += triangleArea;
 }
-...
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+Then we will sort triangles by their area and compute probability distribution function and cumulative distribution function values for each:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 // sort emitter triangles from smallest to largest
 std::stable_sort(std::begin(emitterTriangleBuffer), std::end(emitterTriangleBuffer),
     [](const EmitterTriangle& l, const EmitterTriangle& r){
     return l.area < r.area;
 });
 
-// compute pdf and cdf for each triangle
 float cdf = 0.0f;
 for (EmitterTriangle& t : emitterTriangleBuffer)
 {
@@ -409,8 +418,12 @@ for (EmitterTriangle& t : emitterTriangleBuffer)
     t.pdf = t.area / totalLightArea;
     cdf += t.pdf;
 }
-// add one dummy triangle with cdf = 1.0f to the back of the list
-// this will be used for randomly sample one triangle
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+And now let's add one dummy triangle with cdf equals to one to the back of the list, it will be used to randomly sample one triangle. 
+We just need it's cdf to be one, but no other fields are requied, since this fake triangle will never be selected in the shader:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 emitterTriangleBuffer.emplace_back();
 emitterTriangleBuffer.back().cdf = 1.0f;
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -419,8 +432,8 @@ emitterTriangleBuffer.back().cdf = 1.0f;
 Now we need to sample one triangle from this array. Here I will provide a brief description and code for the sampling.
 For details please refer to section **13.3** (SAMPLING RANDOM VARIABLES) in the **PBRT book**.
 
-We have an array of triangles, each having cdf value larger than previous one, so having random value ξ,
-we can sample one these triangles according to it's probability (which is nothing but area of the triangle
+We have an array of triangles, each having cdf value larger than previous one, so let's say we have a random value ξ,
+we can sample one of these triangles according to it's probability (which is nothing but area of the triangle
 divided by total area of all triangles). It means that with uniform distributiuon of the random values we will
 more likely select larger triangles than smaller ones. In order to sample triangle, we need to iterate over them
 and find one with cdf value not larger than our random value ξ:
@@ -556,7 +569,8 @@ kernel void lightSamplingHandler(
     uint2 size [[threads_per_grid]])
 {
     uint rayIndex = coordinates.x + coordinates.y * size.x;
-    if (intersections[rayIndex].primitiveIndex == lightSamplingRays[rayIndex].targetPrimitiveIndex)
+    if (intersections[rayIndex].primitiveIndex == 
+        lightSamplingRays[rayIndex].targetPrimitiveIndex)
     {
         rays[rayIndex].radiance += 1.0f;
     }
@@ -579,18 +593,28 @@ Luckily, most of the changes will be only on GPU side (in kernels), but we need 
 EmitterTriangle structure, so we can actually know it's luminance. Also, we will add a `throughput` value to the
 light sampling ray structure, and in case of successfull intersection will add it to the main ray's radiance.
 
-Basically, we already have light sampling, we just need to do it more carefully and physically-based. For this we have to
+Basically, we already have light sampling, we just need to do it more carefully and physically-based. In order to do this we have to
 determine a probability of sampling specific point inside specific triangle. Also, we need to take into account surface's
-BSDF, but for now we will assume that all surfaces are perfectly diffuse and have Lambert BSDF (`1/π`).
-Since we alreay selected a point on the emitter triangle, we can easily determine BSDF value as:
+BSDF. For now we will assume that all surfaces are perfectly diffuse and have Lambertinan BSDF (`1/π`).
+Since we already selected a point on the emitter triangle, we can easily determine BSDF value as:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 float materialBsdf = (1.0 / PI) * dot(directionToLight, currentVertex.n);
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
-Probability of sampling triangle and point inside it accounts discrete probability and probability of sampling point
-with respect to solid angle (see section **14.2.2** (SAMPLING SHAPES) of the **PBRT book** for great details).
-The former we already have in our emitter triangle (remember pdf field), the latter is determined as:
+Now we need to compute a probability of selecting a point inside a specific triangle. Fortunatelly, we already know probability 
+of selecting one triangle in our array (which is `triangle_area / total_area`) so we can just use it directly. Probability 
+of selecting on point uniformly on the triangle's surface equals to `1.0 / triangle_area`, but we need to convert it to the 
+probability of selecting direction on unit sphere. There is a simple relationship between this values:
+
+\(pdf(direction) = d^2 / (cosθ * triangleArea)\)
+
+Where \(d\) is distance between current point and selected point on the triangle, 
+and \(θ\) is an angle between direction to the selected point and the normal on the light's surface at the selected point.
+
+For more theory please refer to the section **14.2.2** (SAMPLING SHAPES) of the **PBRT book** or 
+**Chapter 7** (Sampling Lights Directly) in **Ray Tracing: The Rest Of Your Life** by Peter Shirley. 
+Let's take a look at the code:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 float cosTheta = -dot(directionToLight, lightVertex.n);
