@@ -79,7 +79,7 @@ Let's recall a rendering equation (I heard that each post regarding the graphics
 ![](images/pic-3.png)
 
 Basically, what we are doing here is that we estimating value of the given equation. We are doing this by using Monte-Carlo integration.
-To those who are not familiar with Monte-Carlo integration theory I'd strongly recommend to read **Chapter 13** of the **PBRT book**
+To those who are not familiar with Monte-Carlo integration theory I'd strongly recommend to read [Chapter 13 Monte Carlo Integration](http://www.pbr-book.org/3ed-2018/Monte_Carlo_Integration.html) of the **PBRT book**
 and view ray-tracing course by [Karoly Zsolnai](https://twitter.com/karoly_zsolnai) (he has amazing YouTube channel
 [Two Minute Papers](https://www.youtube.com/channel/UCbfYPyITQ-7l4upoX8nvctg)), especially
 [chapter 16](https://www.youtube.com/watch?v=Tb6-JfI0HA0&list=PLujxSBD-JXgnGmsn7gEyN28P1DnRZG7qi&index=16) dedicated to Monte-Carlo integration.
@@ -88,8 +88,9 @@ I will briefly describe basic ideas here. To estimate value of the given equatio
 sample the integral at these directions and then by averaging samples (recall previous part on image accumulation)
 we will get an estimated value for the given equation. By using **importance sampling** we can get better estimation
 of the integral by sampling it towards directions which contributes more to the result (read more theory in the
-**Chapter 13.10 IMPORTANCE SAMPLING** of the **PBRT Book**). We need to know a probability function of generating specific
-direction (PDF) and the direction, generated according to this probability. [Alan Wolfe](https://twitter.com/atrix256?lang=en) has the great
+[Chapter 13.10 Importance Sampling](http://www.pbr-book.org/3ed-2018/Monte_Carlo_Integration/Importance_Sampling.html) of the **PBRT Book**).
+We need to know a probability function of generating specific direction (PDF) and the direction, generated according to
+this probability. [Alan Wolfe](https://twitter.com/atrix256?lang=en) has the great
 [blog post](https://blog.demofox.org/2017/08/05/generating-random-numbers-from-a-specific-distribution-by-inverting-the-cdf/)
 on how to generate random variables according to certain probability functions. But this is well known equations and
 I will not derive them here.
