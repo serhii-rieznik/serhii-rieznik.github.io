@@ -1,0 +1,244 @@
+<meta charset="utf-8">
+**Adding multiple bounces**
+
+In the [previous post](../part-2/index.html) we implemented a simple diffuse BRDF.
+Let's extend our ray-tracer with several bounces to get nice global illumination.
+
+As always [source code](https://github.com/sergeyreznik/metal-ray-tracer/commit/215dfe59f21638d3138e46c2daff7b1bedbfb3e1)
+for this post is available on my GitHub page. However, this is the link to the specific commit, because part 3
+introduces way more than just multiple bounces. Rest will be described in next posts.
+
+Basics
+======================================================================
+If we want to enable a global illumination in our ray-tracer, we need to be able to handle
+multiple bounces of our ray. Each time when ray intersects scene we need to generate a new direction
+and send a ray to this direction. Also, on each intersection we can sample light source
+from the intersection point in order to know how much light arrived to this point from the emitter.
+
+Unfortunately, we can't have infinite number of bounces in our current implementation (but we can actually
+extend it), so let's introduce a constant which will define a maximum number of intersections a ray can undergo.
+Let's call it maximum path length. A value of **one** will mean that rays sent from the camera intersects the scene,
+and no further intersections will be calculated, including next event estimation (explicit light sampling).
+It means, that only emitters will be visible in this case. If we don't hit emitter we are now allowed to send a ray
+towards light sources, because in this case max path length would equal to two.
+
+We need to change a code a bit to be able to perform several intersections. In the previous post we had something
+like this (in pseudocode):
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+void draw()
+{
+    generateRays();
+    findIntersections();
+    handleIntersectionsAndSampleEmitters();
+    findIntersectionsWithEmitters();
+    handleIntersectionsWithEmitters();
+    accumulateImage();
+    blitImageToScreen();
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Now we need to make a loop, where we will be finding intersections, sampling light sources and generating
+new rays for the new intersections:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+void draw()
+{
+    generateRays();
+    for (i = 0; i < MAX_PATH_LENGTH; ++i)
+    {
+        findIntersections();
+        handleIntersectionsAndSampleEmitters();
+        if (i + 1 < MAX_PATH_LENGTH)
+        {
+            findIntersectionsWithEmitters();
+            handleIntersectionsWithEmitters();
+        }
+    }
+    accumulateImage();
+    blitImageToScreen();
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+As I said before, in case of `MAX_PATH_LENGTH` equals one - only emitters will be visible on the final image:
+
+![](images/pic-1.png)
+
+Setting `MAX_PATH_LENGTH` to two will produce an image from the second post, where direct illumination onnly is being calculated:
+
+![](images/pic-2.png)
+
+So far, we didn't modify our shader. But if we want to have several bounces we have to generate a new rays.
+in the intersection handler shader. We can generate rays randomly over the hemisphere, aligned with surface's normal,
+but this won't be very efficient since some rays will have a contribution close to zero.
+
+Let's recall a rendering equation (I heard that each post regarding the graphics should include it):
+
+![](images/pic-3.png)
+
+Basically, what we are doing here is that we estimating value of the given equation. We are doing this by using Monte-Carlo integration.
+To those who are not familiar with Monte-Carlo integration theory I'd strongly recommend to read **Chapter 13** of the **PBRT book**
+and view ray-tracing course by [Karoly Zsolnai](https://twitter.com/karoly_zsolnai) (he has amazing YouTube channel
+[Two Minute Papers](https://www.youtube.com/channel/UCbfYPyITQ-7l4upoX8nvctg)), especially
+[chapter 16](https://www.youtube.com/watch?v=Tb6-JfI0HA0&list=PLujxSBD-JXgnGmsn7gEyN28P1DnRZG7qi&index=16) dedicated to Monte-Carlo integration.
+
+I will briefly describe basic ideas here. To estimate value of the given equation we need to generate directions,
+sample the integral at these directions and then by averaging samples (recall previous part on image accumulation)
+we will get an estimated value for the given equation. By using **importance sampling** we can get better estimation
+of the integral by sampling it towards directions which contributes more to the result (read more theory in the
+**Chapter 13.10 IMPORTANCE SAMPLING** of the **PBRT Book**). We need to know a probability function of generating specific
+direction (PDF) and the direction, generated according to this probability. [Alan Wolfe](https://twitter.com/atrix256?lang=en) has the great
+[blog post](https://blog.demofox.org/2017/08/05/generating-random-numbers-from-a-specific-distribution-by-inverting-the-cdf/)
+on how to generate random variables according to certain probability functions. But this is well known equations and
+I will not derive them here.
+
+Sampling diffuse BSDF
+======================================================================
+In order to have better sampling of diffuse BSDF we need to generate directions, where \(cos(θ)\) will have larger values,
+it is well known cosine-weighted distribution on the unit hemisphere, where
+
+\(PDF(d) = \cos(θ) / π\)
+
+To generate from two random values \(ξ_1\) and \(ξ_2\) a random direction according to the given distribution we have to
+chose azimuthal and polar angles as:
+
+\(ϕ = ξ_1 * 2π\)
+
+\(θ = \sqrtξ_2\)
+
+A source code for this:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+float3 alignToDirection(float3 n, float cosTheta, float phi)
+{
+    float3 u;
+    float3 v;
+    buildOrthonormalBasis(n, u, v);
+    float sinTheta = sqrt(1.0f - cosTheta * cosTheta);
+    return (u * cos(phi) + v * sin(phi)) * sinTheta + n * cosTheta;
+}
+
+float3 sampleCosineWeightedHemisphere(float3 n, float2 xi)
+{
+    float cosTheta = sqrt(xi.x);
+    return alignToDirection(n, cosTheta, xi.y * DOUBLE_PI);
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Now we can generate the direction for the next ray, but we also need to know how much energy will arrive from this
+direction and which portion of this energy will contribute to the current point. In other words, we need to calculate
+\(L_i\) and \(f_r\) of our rendering equation. Usually in the very basic implementations ray-tracers are made
+recursive, and estimates lighting in the given point as (pseudocode):
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+float4 color(ray)
+{
+    intersection_point = intersect(ray);
+    ... // exit condition
+        // usually when hitting emitter
+        // or not hitting anything in the scene
+    material_properties = get_material_properties(intersection_point);
+    new_ray = generate_new_ray(...);
+    return material_properties * color(new_ray);
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+But since we can't make a recursive ray-tracing in the compute shader, and actually this is not necessary,
+we can store a value which shows how much energy is lost during the bounces in our `Ray` structure.
+This value will be initialized with `1.0` and on the each bounce we scale it by the material's BSDF divided by probability
+of generating next direction and multiplied by cosine of the angle between current normal and the generated next direction:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+ray.throughput *= (material.color * bsdf) / pdf * cosTheta;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Let's recall how BSDF and PDF for diffuse material are calculated. BSDF equals to \(1/π\), PDF is \(cos(θ) / π\),
+plugging these values to our equation will give us
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+ray.throughput *= material.color * (1.0 / PI) / (cosTheta / PI) * cosTheta;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Which effectively cancels to:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+ray.throughput *= material.color;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Which means that on the each bounce we just scale ray's throughput with the material's color. So whole piece of code
+for generating a new ray inside intersection handler will look like:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+currentRay.base.direction =
+    sampleCosineWeightedHemisphere(currentVertex.n, noiseSample.wx);
+currentRay.base.origin = currentVertex.v + currentVertex.n * DISTANCE_EPSILON;
+currentRay.throughput *= material.diffuse;
+currentRay.bounces += 1;
+// ...
+// also we need to take into account throughput of the ray when sampling light
+// ...
+lightSamplingRay.throughput = emitterTriangle.emissive * currentRay.throughput *
+    (materialBsdf / lightSamplgPdf);
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+One more important step would be to have a random values for each bounce, rather than random values per pixel per frame.
+So, let's extend our noise buffer with one more dimension (add a several "layers" to the noise, each "layer" for each bounce).
+Also, we have to track number of bounces for each ray. Our `Ray` structure will look like:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+struct Ray
+{
+    MPSRayOriginMinDistanceDirectionMaxDistance base;
+    packed_float3 radiance;
+    uint bounces;
+    packed_float3 throughput;
+};
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+And we will sample noise from the buffer according to the current bounce:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+uint noiseSampleIndex =
+    (coordinates.x % NOISE_BLOCK_SIZE) +
+    (coordinates.y % NOISE_BLOCK_SIZE) * NOISE_BLOCK_SIZE +
+    currentRay.bounces * NOISE_BLOCK_SIZE * NOISE_BLOCK_SIZE;
+
+device const float4& noiseSample = noise[noiseSampleIndex];
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Plugging all together
+======================================================================
+Let's recap what we changed and introduced in the code in order to get multiple bounces:
+- added bounces and throughput values to the `Ray` structure;
+- on the CPU side placed intersection handling and light sampling calls into the loop;
+- added a "layers" into the noise buffer;
+- modified intersection handler shader to generate a new rays.
+
+Plugging everything together and setting maximum path length to eight will produce an image with global illumination:
+
+![](images/pic-4.png)
+
+**That's it!**
+
+[Return to the index](../index.html)
+
+<!-- Markdeep: -->
+<style class="fallback">body{visibility:hidden;white-space:pre;font-family:monospace}</style>
+<script src="markdeep.min.js"></script>
+<script src="https://casual-effects.com/markdeep/latest/markdeep.min.js"></script>
+<script>window.alreadyProcessedMarkdeep||(document.body.style.visibility="visible")</script>
