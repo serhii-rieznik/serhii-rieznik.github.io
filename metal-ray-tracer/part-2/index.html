@@ -430,7 +430,7 @@ emitterTriangleBuffer.back().cdf = 1.0f;
 </script>
 
 Now we need to sample one triangle from this array. Here I will provide a brief description and code for the sampling.
-For details please refer to section **13.3** (SAMPLING RANDOM VARIABLES) in the **PBRT book**.
+For details please refer to section [13.3 Sampling random variables](http://www.pbr-book.org/3ed-2018/Monte_Carlo_Integration/Sampling_Random_Variables.html) in the **PBRT book**.
 
 We have an array of triangles, each having cdf value larger than previous one, so let's say we have a random value ξ,
 we can sample one of these triangles according to it's probability (which is nothing but area of the triangle
@@ -586,7 +586,7 @@ Putting everything together and launching our ray-tracer will give us nice image
 Sampling light sources
 ======================================================================
 Final step for this post would be to implement correct light sampling.
-Please refer to the section **14.2** (SAMPLING LIGHT SOURCES) of the **PBRT book** for more theory.
+Please refer to the section [14.2 Sampling light sources](http://www.pbr-book.org/3ed-2018/Light_Transport_I_Surface_Reflection/Sampling_Light_Sources.html) of the **PBRT book** for more theory.
 Here we will be sampling area lights (each emitter triangle considered as a separate light source in our case).
 
 Luckily, most of the changes will be only on GPU side (in kernels), but we need to add emissive value to the
@@ -612,7 +612,7 @@ probability of selecting direction on unit sphere. There is a simple relationshi
 Where \(d\) is distance between current point and selected point on the triangle, 
 and \(θ\) is an angle between direction to the selected point and the normal on the light's surface at the selected point.
 
-For more theory please refer to the section **14.2.2** (SAMPLING SHAPES) of the **PBRT book** or 
+For more theory please refer to the section [14.2.2 Sampling shapes](http://www.pbr-book.org/3ed-2018/Light_Transport_I_Surface_Reflection/Sampling_Light_Sources.html#SamplingShapes) of the **PBRT book** or
 **Chapter 7** (Sampling Lights Directly) in **Ray Tracing: The Rest Of Your Life** by Peter Shirley. 
 Let's take a look at the code:
 <script type="preformatted">
