@@ -96,17 +96,17 @@ I will not derive them here.
 
 Sampling diffuse BSDF
 ======================================================================
-In order to have better sampling of diffuse BSDF we need to generate directions, where \(cos(θ)\) will have larger values,
+In order to have better sampling of diffuse BSDF we need to generate directions, where \(cos(\theta)\) will have larger values,
 it is well known cosine-weighted distribution on the unit hemisphere, where
 
-\(PDF(d) = \cos(θ) / π\)
+\(PDF(d) = \cos(\theta) / \pi\)
 
-To generate from two random values \(ξ_1\) and \(ξ_2\) a random direction according to the given distribution we have to
+To generate from two random values \(\xi_1\) and \(\xi_2\) a random direction according to the given distribution we have to
 chose azimuthal and polar angles as:
 
-\(ϕ = ξ_1 * 2π\)
+\(\phi = \xi_1 * 2\pi\)
 
-\(θ = \sqrtξ_2\)
+\(\theta = \sqrt\xi_2\)
 
 A source code for this:
 <script type="preformatted">
@@ -159,7 +159,7 @@ ray.throughput *= (material.color * bsdf) / pdf * cosTheta;
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 
-Let's recall how BSDF and PDF for diffuse material are calculated. BSDF equals to \(1/π\), PDF is \(cos(θ) / π\),
+Let's recall how BSDF and PDF for diffuse material are calculated. BSDF equals to \(1/\pi\), PDF is \(cos(\theta) / \pi\),
 plugging these values to our equation will give us
 
 <script type="preformatted">
@@ -235,6 +235,7 @@ Plugging everything together and setting maximum path length to eight will produ
 
 **That's it!**
 
+[Next post](../part-3-2/index.html)
 [Return to the index](../index.html)
 
 <!-- Markdeep: -->
