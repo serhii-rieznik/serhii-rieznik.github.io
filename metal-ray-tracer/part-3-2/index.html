@@ -1,0 +1,310 @@
+<meta charset="utf-8">
+**Improving material system**
+
+In the [previous post](../part-3-2/index.html) we added a multiple bounces to our ray-tracer. We introduced
+importance sampling, which helps us to estimate a rendering equation more precisely and implemented global
+illumination in the scene with diffuse materials. Now lets make our material system more explicit to be able to
+add new materials to the scenes.
+
+As always [source code](http://github.com/sergeyreznik/metal-ray-tracer/tree/part-3)
+for this post is available on my GitHub page.
+
+Explicit materials
+======================================================================
+In the previous post we've added multiple bounces and implemented global illumination. On each bounce we scaled ray's
+throughput value by material's color, thanks to the properties of the diffuse material. But in order to have various
+materials we want code to be more generic and not dependent of the specific material properties. Generic would look like:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+currentRay.throughput *= material.color * bsdf / pdf * cosTheta;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+But since BSDF and PDF depends only on material, and \(cos(\theta)\) could be cancelled within BSDF or PDF, idealy
+we would write something like that:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+currentRay.throughput *= material.color * bsdf_weight;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+So, in general case we need to have a function, which will sample material, knowing the input direction,
+the output direction and the normal in a given point. Such function should return BSDF value, PDF value and combined
+value (bsdf_weight) which we will plug directly into the ray's throughput computation. Let's make a structure which
+will hold output of such function and declare function itself:
+
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+struct SampledMaterial
+{
+    packed_float3 direction = {};
+    float bsdf = 0.0f;
+    float pdf = 0.0f;
+    float weight = 0.0f;
+};
+...
+SampledMaterial sampleMaterial(device const Material& material,
+    float3 n, float3 wI, float3 wO)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+We will use \(\omega_i\) for the input direction and \(\omega_o\) for the output direction. Also we need to store
+material type in the `Material` structure. And looks like we are ready to implement this function for diffuse BSDF and
+plug it into our ray-tracer. Let's assume that diffuse BSDF will be used by default. We will also compute
+\(\cos(\theta)\) inside this function - this will give us an ability to output weight, which will not
+contain all cancelled terms:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+SampledMaterial sampleMaterial(device const Material& material,
+    float3 n, float3 wI, float3 wO)
+{
+    SampledMaterial result = { wO }; // put output to the result
+
+    // if output goes under the surface return zero immediately
+    float NdotO = saturate(dot(n, wO));
+    if (NdotO <= 0.0f)
+        return result;
+
+    switch (material.type)
+    {
+    default:
+    {
+        result.bsdf = INVERSE_PI * NdotO;
+        result.pdf = INVERSE_PI * NdotO;
+        result.weight = 1.0f;
+        break;
+        }
+    }
+    return result;
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Generating next bounces
+======================================================================
+In the main ray-tracing shader we will need to do two things:
+1. generate next rays depending on the current material;
+2. update ray's throughput according to the current material.
+
+But our function can only sample BSDF and PDF knowing input and output directions. We need to add another function,
+which will actually generate an output direction from two random variables (as discussed in the previous post)
+and then sample the material:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+SampledMaterial sampleMaterial(device const Material& material,
+    float3 n, float3 wI, device const float4& noiseSample)
+{
+    float3 wO;
+    switch (material.type)
+    {
+    default:
+    {
+        wO = sampleCosineWeightedHemisphere(n, noiseSample.wx);
+    }
+    }
+    return sampleMaterial(material, n, wI, wO);
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Having such function we are ready to plug it into the our main ray-tracing shader:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+// generate next bounce
+SampledMaterial materialSample = sampleMaterial(material, currentVertex.n,
+    currentRay.base.direction, noiseSample);
+currentRay.base.origin = currentVertex.v + currentVertex.n * DISTANCE_EPSILON;
+currentRay.base.direction = materialSample.direction;
+currentRay.throughput *= material.color * materialSample.weight;
+currentRay.bounces += 1;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+One more application of the `sampleMaterial` function - would be use it in the explicit light sampling. As you
+should remember from the second post of this series, we explicitly sampling light sources. To do it we generating rays
+towards randomly chosen points on the light sources and if we actually hit emitters - we are adding radiance to our
+primary rays. And now we can sample material in this direction in order to determing how much incoming light
+contributes to the given point:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+SampledMaterial materialSample = sampleMaterial(material, currentVertex.n, currentRay.base.direction, directionToLight);
+...
+lightSamplingRay.throughput = currentRay.throughput *
+    (emitterTriangle.emissive / lightSamplePdf) *
+    (material.color * materialSample.bsdf) * weight;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Adding mirror (conductor) material
+======================================================================
+Now, everything seems to be ready to add another material. Let's start from adding a mirrors to our scene.
+This is perfectly smooth surfaces that reflects each incoming ray into the one specific direction. Therefore,
+BSDF of such material will equal to `1.0` in the direction of reflected ray and `0.0` elsewhere. So will be a PDF and
+their ratio - BSDF / PDF will only be valid and equal to one in the mirrored direction and zero elsewhere.
+Generating a new direction for such BRDF (this is actually BRDF, not BSDF, because it is not scattering light) is quite
+easy, let's add add another case to out function which generates rays:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+case MATERIAL_MIRROR:
+{
+    wO = reflect(wI, n);
+    break;
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Sampling mirror material is also straightforward - we should check if given output direction is close to mirror, and
+return 1.0 everywhere if it is:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+case MATERIAL_MIRROR:
+{
+    float3 r = reflect(wI, n);
+    float isMirrorDirection = float(abs(1.0 - dot(r, wO)) < ANGLE_EPSILON);
+    result.bsdf = isMirrorDirection;
+    result.pdf = isMirrorDirection;
+    result.weight = isMirrorDirection;
+    break;
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+The most interesting begins when it comes to sampling lights. Let's add another scene, a box with spheres and water
+surface inside. If all materials will be diffuse, scene will look like:
+
+![](images/pic-1.png)
+
+But if we will change spheres and water to be mirrors, we will see this one:
+
+![](images/pic-2.png)
+
+Light sources are black. The trouble in the explicit light sampling. Mirror BRDF and PDF are only valid in one
+direction, and probability of generating this direction when we sampling light source is zero, therefore we never
+actually makes any rays toward light sources that will contribute to the mirror BRDF.
+
+Solution for this would be to not sample light sources explicitly, but add radiance to the rays when we hit
+emitters during the bounces. This is the perfect case for the mirror BRDF - we are generating reflected ray and if it
+hits the emitter, it contributes to the total radiance along this ray. We can easily extend our ray-tracing shader to
+account emitters:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+if (dot(material.emissive, material.emissive) > 0.0)
+{
+    currentRay.radiance += material.emissive * currentRay.throughput;
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Let's also disable explicit light sampling and see what will happen:
+
+![](images/pic-3.png)
+
+Light sources are now visible, but look at diffuse walls - they are very noisy even after 700+ samples.
+Let's limit ray-tracing to 16 samples and compare diffuse surfaces with bsdf sampling and explicit light sampling:
+
+![](images/pic-4.png)![](images/pic-5.png)
+
+Difference is amazing. This happens because we are not generating enough samples to integrate over whole hemisphere,
+and therefore most information about lighting is missing on the diffuse surfaces. How can we deal with this?
+
+Adding rough conductor material
+======================================================================
+Before we deal with the problem described above, let's add another material - rough conductor. This is commonly used
+material, which reflects light in a cone, specified by it's parameter - roughness. The less roughness is - the more
+mirror like material becomes, and when roughness value is large - material reflects light in all directions.
+
+We going to use widely used microfacet material with GGX distribution. Since this is really one of the most used materials,
+I will just provide a pieces of code here:
+
+Sampling material's properties (inside `sampleMaterial` function):
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+case MATERIAL_CONDUCTOR:
+{
+    wI = -wI; // reverse incoming ray, so it points out of surface
+    float3 h = normalize(wI + wO);
+
+    float NdotI = dot(n, wI);
+    float HdotO = dot(h, wO);
+    float NdotH = dot(n, h);
+    {
+        float rs = material.roughness * material.roughness;
+        float F = fresnelConductor(HdotO);
+        float D = ggxNormalDistribution(rs, NdotH);
+        float G = ggxVisibilityTerm(rs, NdotO, NdotI);
+        result.bsdf = F * D * G / (4.0 * NdotI);
+        result.pdf = D * NdotH / (4.0 * HdotO);
+        result.weight = F * ((G * HdotO) / (NdotI * NdotH));
+    }
+    break;
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+`ggxNormalDistribution` and `ggxVisibilityTerm` are also well known, so I don't see any sense to provide them here.
+`fresnelConductor` could be hardcoded to return `1.0` now, and then updated with something very physically-based :)
+
+To generate a new direction according to this material we will use:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+float3 reflected = reflect(wI, n);
+...
+case MATERIAL_CONDUCTOR:
+{
+    wO = sampleGGXDistribution(reflected, noiseSample.wz, material.roughness);
+    break;
+}
+
+// ...
+
+float3 sampleGGXDistribution(float3 n, float2 xi, float alpha)
+{
+    float cosTheta = sqrt((1.0f - xi.x) /
+        (xi.x * (alpha * alpha - 1.0f) + 1.0f));
+
+    return alignToDirection(n, cosTheta, xi.y * DOUBLE_PI);
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Let's plug this material into the scene and see how it looks like with explicit light sampling and bsdf sampling:
+
+![](images/pic-6.png)![](images/pic-7.png)
+
+Difference is not that obvious on this scene. But Eric Veach [in 1995](https://sites.fas.harvard.edu/~cs278/papers/veach.pdf)
+created a scene, that represents mentioned problem quite well. There are four liht sources, each other in larger but
+has less intensity, also there is four bars, with each other be more rough.
+Let's recreate this scene and render it with light sampling and bsdf sampling:
+
+![](images/pic-8.png)![](images/pic-9.png)
+
+On the left image (with explicit light sampling) more more smooth bars lacks reflections of the largest emitter. This
+happens because when we generating rays toward light sources - we rarely generating them in the mirror direction
+(I'd say 25% less, but not quite sure if this is exact number), and such rays does not contibute to the final image.
+On the right image (with bsdf sampling) we generating rays according to the material's distribution, and therefore almost
+always hits light sources. This works for almost mirror bars, but fails for bars with large roughness and diffuse wall behind,
+because randomly scattered rays does not always hits light sources.
+
+Multiple importance sampling
+======================================================================
+To deal with the problem described above we can use multiple importance sampling.
+
+// TODO : finish
+
+[Return to the index](../index.html)
+
+<!-- Markdeep: -->
+<style class="fallback">body{visibility:hidden;white-space:pre;font-family:monospace}</style>
+<script src="markdeep.min.js"></script>
+<script src="https://casual-effects.com/markdeep/latest/markdeep.min.js"></script>
+<script>window.alreadyProcessedMarkdeep||(document.body.style.visibility="visible")</script>
