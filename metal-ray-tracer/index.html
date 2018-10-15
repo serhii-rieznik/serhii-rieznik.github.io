@@ -1,4 +1,5 @@
 <meta charset="utf-8">
+
 **Writing ray-tracer using Metal Performance Shaders**
     
 In this series of posts I'm going to describe ray-tracer implementation
@@ -8,7 +9,7 @@ but we will start from scratch and implement a more physically correct ray-trace
 with next event estimation, multiple importance sampling, spectral rendering and maybe something else :)
 
 Before the start
-================================================================================
+=======================================================================================
 I'm assuming a reader is familiar with development for macOS (or iOS),
 so I will skip trivial things like creating a project, using Objective-C, etc.
 But make sure you have at least:
@@ -31,7 +32,7 @@ They will be added to the [source code](https://github.com/sergeyreznik/metal-ra
 for this blog post series as submodules.
 
 Tracing our first triangle
-================================================================================
+=======================================================================================
 In [this post](part-1/index.html) I will describe how to setup an environment for
 our ray-tracer and trace one hard-coded triangle.
 
@@ -40,6 +41,12 @@ Tracing some geometry
 In [this post](part-2/index.html) we will load and trace geometry from a file,
 prepare an environment for path tracing, and implement simple diffuse BRDF with
 next event estimation.
+
+Extending the ray-tracer
+=======================================================================================
+Adding multiple bounces
+--------------------------------------------------------------------------------
+In [this post](part-3-1/index.html) we will add multiple light bounces to our ray-tracer.
 
 <!-- Markdeep: -->
 <style class="fallback">body{visibility:hidden;white-space:pre;font-family:monospace}</style>
