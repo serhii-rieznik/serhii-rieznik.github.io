@@ -13,7 +13,7 @@ Explicit materials
 ======================================================================
 In the previous post we've added multiple bounces and implemented global illumination. On each bounce we scaled ray's
 throughput value by material's color, thanks to the properties of the diffuse material. But in order to have various
-materials we want code to be more generic and not dependent of the specific material properties. Generic would look like:
+materials we want code to be more generic and not dependent of the specific material properties. Generic code would look like:
 
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
@@ -138,7 +138,7 @@ SampledMaterial materialSample = sampleMaterial(material, currentVertex.n, curre
 ...
 lightSamplingRay.throughput = currentRay.throughput *
     (emitterTriangle.emissive / lightSamplePdf) *
-    (material.color * materialSample.bsdf) * weight;
+    (material.color * materialSample.bsdf);
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 
@@ -282,29 +282,28 @@ Let's plug this material into the scene and see how it looks like with explicit 
 ![](images/pic-6.png)![](images/pic-7.png)
 
 Difference is not that obvious on this scene. But Eric Veach [in 1995](https://sites.fas.harvard.edu/~cs278/papers/veach.pdf)
-created a scene, that represents mentioned problem quite well. There are four liht sources, each other in larger but
-has less intensity, also there is four bars, with each other be more rough.
+created a scene, that represents mentioned problem quite well. There are four light sources, each other in larger but
+has less intensity, also there are four bars and each other is more rough.
 Let's recreate this scene and render it with light sampling and bsdf sampling:
 
 ![](images/pic-8.png)![](images/pic-9.png)
 
-On the left image (with explicit light sampling) more more smooth bars lacks reflections of the largest emitter. This
-happens because when we generating rays toward light sources - we rarely generating them in the mirror direction
-(I'd say 25% less, but not quite sure if this is exact number), and such rays does not contibute to the final image.
-On the right image (with bsdf sampling) we generating rays according to the material's distribution, and therefore almost
-always hits light sources. This works for almost mirror bars, but fails for bars with large roughness and diffuse wall behind,
-because randomly scattered rays does not always hits light sources.
+On the left image (with explicit light sampling) more smooth bars lacks proper reflections of the largest emitter. This
+happens because when we are generating rays toward light sources - we rarely generating them in the mirror direction,
+and such rays does not contibute to the final image. On the right image (with bsdf sampling) we generating rays according
+to the material's distribution, and therefore almost always hits light sources. This works for almost mirror bars,
+but fails for bars with large roughness and diffuse wall behind, because randomly reflected rays does not always hits light sources.
 
 Multiple importance sampling
 ======================================================================
 So how we deal with the problem described above, where not BSDF sampling, nor light sampling converges well? Solution
-would be to sample both of them - BSDF and light sources. But imagine a situation where you sampling light source,
-adding incoming radiance to the ray and then sampling BSDF in the same direction. And again ray will hit same light source
+would be to sample both of them - BSDF and the light sources. But imagine a situation where you sampling light source,
+adding some radiance to the ray and then sampling BSDF in the same direction. And again ray will hit same light source
 along the same direction, and this light source will contribute to the ray's radiance twice. Seems like we can average
 samples in this case (i.e take light sampling result with weight 0.5, and BSDF sampling result with the same weight).
-But this will work only when we are sampling BSDF and ligh sources in exactly one direction. But since there are a lot
-of random values around - this rarely happens. The real solution for this problem will be to use **balance heuristic**.
-Let's say \(f_p\) is probability of sampling light source, and \(g_p\) is probability of sampling BSDF (generating
+But this will work only when we are sampling BSDF and the ligh sources in exactly one direction. But since there are a lot
+of random values around - this rarely happens. The real solution for this problem will be to use **balance heuristic** for weights.
+Let's say \(f_p\) is the probability of sampling light source, and \(g_p\) is the probability of sampling BSDF (generating
 a new direction for the ray, exactly what we are doing in `sampleMaterial` function). Then weight of the light sampling
 would be:
 
