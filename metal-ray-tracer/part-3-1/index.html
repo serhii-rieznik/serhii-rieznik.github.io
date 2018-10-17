@@ -6,21 +6,21 @@ Let's extend our ray-tracer with several bounces to get nice global illumination
 
 As always [source code](https://github.com/sergeyreznik/metal-ray-tracer/commit/215dfe59f21638d3138e46c2daff7b1bedbfb3e1)
 for this post is available on my GitHub page. However, this is the link to the specific commit, because part 3
-introduces way more than just multiple bounces. Rest will be described in next posts.
+introduces way more than just multiple bounces. Rest will be described in the next post.
 
 Basics
 ======================================================================
 If we want to enable a global illumination in our ray-tracer, we need to be able to handle
-multiple bounces of our ray. Each time when ray intersects scene we need to generate a new direction
+multiple bounces of our rays. Each time when ray intersects objects in the scene we need to generate a new direction
 and send a ray to this direction. Also, on each intersection we can sample light source
 from the intersection point in order to know how much light arrived to this point from the emitter.
 
-Unfortunately, we can't have infinite number of bounces in our current implementation (but we can actually
-extend it), so let's introduce a constant which will define a maximum number of intersections a ray can undergo.
+Unfortunately, we can't have infinite number of bounces in our current implementation, so let's introduce a constant
+which will define a maximum number of intersections a ray can undergo.
 Let's call it maximum path length. A value of **one** will mean that rays sent from the camera intersects the scene,
 and no further intersections will be calculated, including next event estimation (explicit light sampling).
-It means, that only emitters will be visible in this case. If we don't hit emitter we are now allowed to send a ray
-towards light sources, because in this case max path length would equal to two.
+It means, that only emitters will be visible in this case. And if we didn't hit the emitter we are now allowed to send
+a new ray towards light sources, because in this case max path length would equal to two.
 
 We need to change a code a bit to be able to perform several intersections. In the previous post we had something
 like this (in pseudocode):
@@ -66,11 +66,11 @@ As I said before, in case of `MAX_PATH_LENGTH` equals one - only emitters will b
 
 ![](images/pic-1.png)
 
-Setting `MAX_PATH_LENGTH` to two will produce an image from the second post, where direct illumination onnly is being calculated:
+Setting `MAX_PATH_LENGTH` to two will produce an image from the second post, where direct illumination only is being calculated:
 
 ![](images/pic-2.png)
 
-So far, we didn't modify our shader. But if we want to have several bounces we have to generate a new rays.
+So far, we didn't modify our shader. But if we want to have several bounces we have to generate a new rays
 in the intersection handler shader. We can generate rays randomly over the hemisphere, aligned with surface's normal,
 but this won't be very efficient since some rays will have a contribution close to zero.
 
@@ -84,16 +84,16 @@ and view ray-tracing course by [Karoly Zsolnai](https://twitter.com/karoly_zsoln
 [Two Minute Papers](https://www.youtube.com/channel/UCbfYPyITQ-7l4upoX8nvctg)), especially
 [chapter 16](https://www.youtube.com/watch?v=Tb6-JfI0HA0&list=PLujxSBD-JXgnGmsn7gEyN28P1DnRZG7qi&index=16) dedicated to Monte-Carlo integration.
 
-I will briefly describe basic ideas here. To estimate value of the given equation we need to generate directions,
+I will briefly describe basic idea here. To estimate value of the given rendering equation we need to generate random directions,
 sample the integral at these directions and then by averaging samples (recall previous part on image accumulation)
-we will get an estimated value for the given equation. By using **importance sampling** we can get better estimation
-of the integral by sampling it towards directions which contributes more to the result (read more theory in the
-[Chapter 13.10 Importance Sampling](http://www.pbr-book.org/3ed-2018/Monte_Carlo_Integration/Importance_Sampling.html) of the **PBRT Book**).
-We need to know a probability function of generating specific direction (PDF) and the direction, generated according to
-this probability. [Alan Wolfe](https://twitter.com/atrix256?lang=en) has the great
-[blog post](https://blog.demofox.org/2017/08/05/generating-random-numbers-from-a-specific-distribution-by-inverting-the-cdf/)
-on how to generate random variables according to certain probability functions. But this is well known equations and
-I will not derive them here.
+we will get an estimated value for the given rendering equation.
+
+By using **importance sampling** we can get better estimation of the integral by sampling it towards directions which
+contributes more to the result (read more theory in the [Chapter 13.10 Importance Sampling](http://www.pbr-book.org/3ed-2018/Monte_Carlo_Integration/Importance_Sampling.html) of the **PBRT Book**).
+In order to use it we need to know a probability function of generating specific direction and the direction, generated according to
+this probability. These are well known equations and I will not derive them here. If you curious about how this can be derived -
+[Alan Wolfe](https://twitter.com/atrix256?lang=en) has the great [blog post](https://blog.demofox.org/2017/08/05/generating-random-numbers-from-a-specific-distribution-by-inverting-the-cdf/)
+on how to generate random variables according to certain probability functions, read it if you want more math and details.
 
 Sampling diffuse BSDF
 ======================================================================
@@ -150,9 +150,10 @@ float4 color(ray)
 </script>
 
 But since we can't make a recursive ray-tracing in the compute shader, and actually this is not necessary,
-we can store a value which shows how much energy is lost during the bounces in our `Ray` structure.
-This value will be initialized with `1.0` and on the each bounce we scale it by the material's BSDF divided by probability
-of generating next direction and multiplied by cosine of the angle between current normal and the generated next direction:
+we can store a new value, which shows how much energy is lost during the bounces, in our `Ray` structure.
+This value will be initialized with `1.0` (meaning not energey was lost) and on the each bounce we scale it by the
+material's BSDF divided by probability of generating next direction and multiplied by cosine of the angle between
+current normal and the generated next direction:
 
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
@@ -237,6 +238,7 @@ Plugging everything together and setting maximum path length to eight will produ
 **That's it!**
 
 [Next post](../part-3-2/index.html)
+
 [Return to the index](../index.html)
 
 <!-- Markdeep: -->
