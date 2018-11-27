@@ -1,0 +1,107 @@
+<meta charset="utf-8">
+**Going slightly physically based**
+
+In the previous parts we've implemented diffuse and rough conductor materials. 
+Now we going to add a two materials - plastic and dielectric. Also we going to 
+make sure that our materials are physically correct (or at least plausible).
+
+[Source Code](http://github.com/sergeyreznik/metal-ray-tracer/tree/part-4)
+for this post is available on my GitHub page. Additionally, I've created a 
+[repository](https://github.com/sergeyreznik/raytracing-references) with scenes that were used to 
+validate ray-tracer.
+
+Easy way to validate results
+================================================================================
+Before implementing a new materials, we need to figure out a way to make sure that our materials are 
+physically correct. In the previous posts I compared images produced by ray-tracer with those produced by Mitsuba. 
+But such comparison gives nothing but visual similarity, and while rendering could be 
+incorrect it still will be visually similar to the correct one. Therefore, if we want to compare images against Mitsuba
+we need to develop a more robust way to do it. 
+
+I propose a simple method, which will be able to quickly provide an information about luminance 
+in the images, and compare it to the reference image produced by Mitsuba (or PBRT if you want). Take a look at this two images:
+
+![](images/pic-1.png)![](images/pic-2.png)
+
+They look almost identical and what is important they both looks natural. It is hard to notice that glass box is 
+slightly different (I intentionally modified Fresnel term), especially when comparing final image to the reference. 
+
+So lets make a simple comparison method: get the average value from red, green and blue components of
+ each pixel of source image and reference and find the difference between two averaged values. If difference is greater than zero 
+ - it means that image produced by our ray-tracer is brighter than reference and vice versa. So lets output this 
+ difference to the green channel if is is greater than zero and negative difference to the red channel if it is smaller than zero:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+float colorLum = dot(color.xyz, 1.0f / 3.0f);
+float referenceLum = dot(referenceColor.xyz, 1.0f / 3.0f);
+float diff = (colorLum - referenceLum) * COMPARE_SCALE;
+color = (diff > 0.0f) ? 
+    float4(0.0f, diff, 0.0f, 1.0f) :
+    float4(-diff, 0.0f, 0.0f, 1.0f);
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Ideally we would see a black color if we matched the reference perfectly. But in the real world there a several factors 
+that won't allow us to see a perfect zero difference:
+- number of samples are usually limited, which leads to noise;
+- .exr format (to which Mitsuba and PBRT can save results) stores data as half floats (16 bits), which introduces rounding errors.
+
+This mean that when we implemented everything correctly we will likely be seeing a red-green noise on the image. 
+
+Compare the difference images below. These are difference between images above and the reference image:
+
+![](images/pic-3.png)![](images/pic-4.png)
+
+Note the glass box: on the first image we can see an almost uniform red-green noise, 
+while on the second image glass box has noticeable darker (reddish) sides. Tall box are brighter on the bost images, this will be explained below, 
+when we will implement plastic BRDF.
+
+This is very rough methon of estimate a similarity to the reference, but it gives results almost immediately.
+
+Furnace test
+================================================================================
+Another (and actually more proper) way to validate materials is so called "Furnace test". The name comes from a property of a furnace in thermal equilibrium. 
+When a furnace reaches equilibrium, its interior has a completely uniform appearance, causing all geometric features to disappear [^](http://www.scratchapixel.com/lessons/3d-basic-rendering/global-illumination-path-tracing/global-illumination-path-tracing-practical-implementation).
+Idea behind it is to put a white object, (which does not absorbs light) usually a sphere, to the environment having uniform color. 
+If BRDF is implemented correctly (i.e have energy conservation property) then the object will have color of the environment - 
+it will not absorb light and will not emit any additional light. Usually it is good to make a gray environment, in this way it would be easier to notice 
+energy gain.
+
+Take a look on these three images:
+
+![](images/pic-5.png)![](images/pic-6.png)![](images/pic-7.png)
+
+The first one - is the correct plastic BRDF implementation. In the second one BRDF was not multiplied by cosine between normal and outgoing ray direction,
+the third one does not accont for Fresnel in diffuse component and probability distribution function.
+
+So now we have a least two methods to verify our BSDFs, so let's implement plastic and dielectric materials.
+
+Plastic BRDF
+================================================================================
+Let's add a plastic BRDF
+
+Glass BSDF
+================================================================================
+Let's add a glass BSDF
+
+Unbiased rendering
+================================================================================
+Probability of terminating a path
+
+![](images/pic-1.png)
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+hello
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+**That’s it!**
+
+[Return to the index](../index.html)
+
+<!-- Markdeep: -->
+<style class="fallback">body{visibility:hidden;white-space:pre;font-family:monospace}</style>
+<script src="markdeep.min.js"></script>
+<script src="https://casual-effects.com/markdeep/latest/markdeep.min.js"></script>
+<script>window.alreadyProcessedMarkdeep||(document.body.style.visibility="visible")</script>
