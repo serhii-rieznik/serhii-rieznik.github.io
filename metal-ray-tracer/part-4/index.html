@@ -2,7 +2,7 @@
 **Going slightly physically based**
 
 In the previous parts we've implemented diffuse and rough conductor materials. 
-Now we going to add a two materials - plastic and dielectric. Also we going to 
+Now we going to add two materials - plastic and dielectric. Also we are going to
 make sure that our materials are physically correct (or at least plausible).
 
 [Source Code](http://github.com/sergeyreznik/metal-ray-tracer/tree/part-4)
@@ -10,26 +10,28 @@ for this post is available on my GitHub page. Additionally, I've created a
 [repository](https://github.com/sergeyreznik/raytracing-references) with scenes that were used to 
 validate ray-tracer.
 
+![Scene from Pica Pica](images/pic-0.png)
+
 Easy way to validate results
 ================================================================================
-Before implementing a new materials, we need to figure out a way to make sure that our materials are 
+Before implementing new materials, we need to figure out a way to make sure that our materials are
 physically correct. In the previous posts I compared images produced by ray-tracer with those produced by Mitsuba. 
 But such comparison gives nothing but visual similarity, and while rendering could be 
-incorrect it still will be visually similar to the correct one. Therefore, if we want to compare images against Mitsuba
+incorrect it will still be visually similar to the correct one. Therefore, if we want to compare images against Mitsuba
 we need to develop a more robust way to do it. 
 
-I propose a simple method, which will be able to quickly provide an information about luminance 
-in the images, and compare it to the reference image produced by Mitsuba (or PBRT if you want). Take a look at this two images:
+I propose a simple method, that will be able to quickly provide an information about luminance
+in the images, and compare it to the reference image produced by Mitsuba (or PBRT if you want). Take a look at these two images:
 
 ![](images/pic-1.png)![](images/pic-2.png)
 
-They look almost identical and what is important they both looks natural. It is hard to notice that glass box is 
+They look almost identical and what is important they both looks natural. It is hard to notice that the glass box is
 slightly different (I intentionally modified Fresnel term), especially when comparing final image to the reference. 
 
-So lets make a simple comparison method: get the average value from red, green and blue components of
- each pixel of source image and reference and find the difference between two averaged values. If difference is greater than zero 
- - it means that image produced by our ray-tracer is brighter than reference and vice versa. So lets output this 
- difference to the green channel if is is greater than zero and negative difference to the red channel if it is smaller than zero:
+So let's make a simple comparison method: get the average value from red, green and blue components of
+ each pixel of source image and reference and find the difference between two averaged values. If the difference is greater than zero
+ - it means that image produced by our ray-tracer is brighter than the reference and vice versa. So let's output this
+ difference to the green channel if is greater than zero and negative difference to the red channel if it is smaller than zero:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 float colorLum = dot(color.xyz, 1.0f / 3.0f);
@@ -53,19 +55,19 @@ Compare the difference images below. These are difference between images above a
 ![](images/pic-3.png)![](images/pic-4.png)
 
 Note the glass box: on the first image we can see an almost uniform red-green noise, 
-while on the second image glass box has noticeable darker (reddish) sides. Tall box are brighter on the bost images, this will be explained below, 
+while on the second image glass box has noticeable darker (reddish) sides. Tall box is brighter on the both images, this will be explained below,
 when we will implement plastic BRDF.
 
-This is very rough methon of estimate a similarity to the reference, but it gives results almost immediately.
+This is very rough method to estimate a similarity to the reference, but it gives results almost immediately.
 
 Furnace test
 ================================================================================
 Another (and actually more proper) way to validate materials is so called "Furnace test". The name comes from a property of a furnace in thermal equilibrium. 
 When a furnace reaches equilibrium, its interior has a completely uniform appearance, causing all geometric features to disappear [^](http://www.scratchapixel.com/lessons/3d-basic-rendering/global-illumination-path-tracing/global-illumination-path-tracing-practical-implementation).
-Idea behind it is to put a white object, (which does not absorbs light) usually a sphere, to the environment having uniform color. 
+The idea behind it is to put a white object, (which does not absorb light) usually a sphere, to the environment having uniform color.
 If BRDF is implemented correctly (i.e have energy conservation property) then the object will have color of the environment - 
-it will not absorb light and will not emit any additional light. Usually it is good to make a gray environment, in this way it would be easier to notice 
-energy gain.
+it will not absorb light and will not emit any additional light. Usually it is good idea to make a gray environment,
+in this way it would be easier to notice energy gain.
 
 Take a look on these three images:
 
@@ -74,21 +76,405 @@ Take a look on these three images:
 The first one - is the correct plastic BRDF implementation. In the second one BRDF was not multiplied by cosine between normal and outgoing ray direction,
 the third one does not accont for Fresnel in diffuse component and probability distribution function.
 
-So now we have a least two methods to verify our BSDFs, so let's implement plastic and dielectric materials.
+So now we have a least two methods to verify our BSDFs, so let's implement plastic and dielectric materials. But before
+I want to slightly refactor shader code to eliminate all duplications, let's keep two methods:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+inline SampledMaterial evaluateMaterial(device const Material& material,
+    float3 nO, float3 wI, float3 wO)
+{
+    // evaluate values such as BSDF, PDF and weight
+    ...
+}
+
+
+SampledMaterial sampleMaterial(device const Material& material,
+    float3 nO, float3 wI, device const RandomSample& randomSample)
+{
+    // sample outgoing direction and the call evaluateMaterial
+    // with the corresponding wO
+    ...
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+We will be using `sampleMaterial` (which will call `evaluateMaterial` inside) for generating new ray direction and
+`evaluateMaterial` for the next event estimation. All code related to BSDF evaluation will only be located in the
+`evaluateMaterial` method.
+
 
 Plastic BRDF
 ================================================================================
-Let's add a plastic BRDF
+Plasic material consists of two components - specular and diffuse. It reflect portion of light (specular component)
+and absorbs and then re-emits rest of the light (diffuse component). The exact amount of reflected light is defined by
+Fresnel equations, I believe they are pretty common in computer graphics and I don't need to go in details with them.
+Usually, Schlik approximation is being used, but since we are going slightly physically based, let's use real formula.
+
+Considering unpolarized light, a function which calculates Fresnel equation will look like:
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+inline float fresnelDielectric(float3 i, float3 m, float eta)
+{
+    float result = 1.0f;
+    float cosThetaI = abs(dot(i, m));
+    float sinThetaOSquared = (eta * eta) * (1.0f - cosThetaI * cosThetaI);
+    if (sinThetaOSquared <= 1.0)
+    {
+        float cosThetaO = sqrt(saturate(1.0f - sinThetaOSquared));
+        float Rs = (cosThetaI - eta * cosThetaO) / (cosThetaI + eta * cosThetaO);
+        float Rp = (eta * cosThetaI - cosThetaO) / (eta * cosThetaI + cosThetaO);
+        result = 0.5f * (Rs * Rs + Rp * Rp);
+    }
+    return result;
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Where `eta` is ratio of index of refracions - IOR of medium from light arrives divided by IOR of
+medium to which light is being transmitted. For plastic it is common case to use 1.5 as IOR, but we want this to be
+customizable.
+
+In order to sample plastic material we need to decide if this would be reflected of diffuse ray. We can use Fresnel
+equations here as well, and say that probability of generating reflected ray is equal to the value of Fresnel:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+inline SampledMaterial sample(device const Material& material,
+    float3 nO, float3 wI, device const RandomSample& randomSample)
+{
+    // sample microfacet at given point
+    float alphaSquared = material.roughness * material.roughness;
+    float3 m = sampleGGXDistribution(nO, randomSample.bsdfSample, alphaSquared);
+
+    // calculate Fresnel equation for given microfacet
+    float F = fresnelDielectric(wI, m, material.extIOR, material.intIOR);
+
+    float3 wO = {};
+    if (randomSample.componentSample < F)
+    {
+        wO = reflect(wI, m);
+    }
+    else
+    {
+        wO = sampleCosineWeightedHemisphere(nO, randomSample.bsdfSample);
+    }
+
+    return evaluate(material, nO, wI, wO);
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+**It is important to not foget to plug Fresnel value into the PDF.**
+
+So we are generating either reflected ray or unifomly (actually cosine-weighted) ray around geometric normal.
+
+Now we need a function that evaluates plastic material. We will be using the same microfactet BRDF which we used for
+conductors in the previous part, but now instead of `fresnelConductor` we will be usign `fresnelDielectric` method.
+As we mentioned before - part of the light will be reflected (specular component) - this part is defined by microfactet
+material, and diffuse part is defined by the same diffuse BRDF but scaled with `(1.0f - F)`, which means that diffuse light
+is all light which was not reflected.
+
+Since we used Fresnel term as a probability for generating reflected ray we need to plug it into the
+probability density function. PDF of plastic material also consists of PDF of microfacet BRDF scaled by probability of
+generating reflected ray (`F`) and PDF of diffuse BRDF, scaled by probability of generating diffuse ray (`1.0f - F`).
+Since we can't nicely cancel components of `brdf / pdf` as we did with conductor material - we will write weight
+just as a ratio between BRDF and PDF:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+SampledMaterial result;
+// ...
+float3 m = normalize(wO - wI);
+float NdotM = dot(nO, m);
+float MdotO = dot(m, wO);
+
+float a = material.roughness * material.roughness;
+float F = fresnelDielectric(wI, m, material.extIOR, material.intIOR);
+float D = ggxNormalDistribution(a, nO, m);
+float G = ggxVisibilityTerm(a, wI, wO, nO, m);
+float J = 1.0f / (4.0 * MdotO);
+
+result.bsdf =
+    material.diffuse * INVERSE_PI * NdotO * (1.0f - F) +
+    material.specular * (F * D * G / (4.0 * NdotI));
+
+result.pdf =
+    INVERSE_PI * NdotO * (1.0f - F) +
+    D * NdotM * J * F;
+
+result.weight = result.bsdf / result.pdf;
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+This will give use nice plastic spheres:
+
+![Actually every surface on this image is plastic, just with various roughness](images/pic-8.png)
 
 Glass BSDF
 ================================================================================
-Let's add a glass BSDF
+*(glass BSDF is based on a [classic paper](https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.pdf) :
+**Microfacet Models for Refraction through Rough Surfaces**)*
+
+Glass material also consists of two components - specular and transmittance. Specular is pretty much the same as in plastic
+material, while transmittance is a little bit tricky. So I will mostly focus on transmittance.
+
+We going to use same approach for sampling glass material - use Fresnel term as a probability of generating reflected ray and
+`(1.0f - F)` as a probability of generating transmitted ray.
+
+Notice the condition in the method that calculates Fresnel equation:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+...
+if (sinThetaOSquared <= 1.0)
+...
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Using Snell's law:
+
+\( \eta_i * sin\theta_i = \eta_o * sin\theta_o \)
+
+we can figure out a critical angle, where \(sin\theta_o\) would be greater than one, and which will mean a
+[total internal reflection](https://en.wikipedia.org/wiki/Total_internal_reflection). In this case Fresnel term will
+return `1.0f` and therefore we always will be generating reflected ray, so we don't need to add any extra conditions to our code.
+
+Now there are two cases for the transmitted ray. One when ray enters more dense medium and the second when rays goes from denser medium:
+
+*****************************************
+* 1)                | 2)                *
+*         n, m      |          n, m     *
+* wI \    ^         |          ^   ^ wO *
+*     \   |         |          |  /     *
+*      \  |         |          | /      *
+*       v |         |          |/       *
+* ---------------   |   --------------- *
+*         \         |         ^         *
+*          \        |        /          *
+*           \       |       /           *
+*            v wO   |   wI /            *
+*****************************************
+
+The difference is that in the second case we need to flip normal, in order to make our computation consistent,
+considering \((\omega_i • n) < 0.0 \). In case of reflected ray \((\omega_o • n)\) will be greater than zero
+(outgoing direction and normal lies in the same hemisphere), but in case of transmitted ray \((\omega_i • n)\)
+will be less than zero, because transmitted ray goes to the other hemisphere than normal. Therefore, the sampling method
+will look like:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+inline SampledMaterial sample(device const Material& material,
+    float3 nO, float3 wI, device const RandomSample& randomSample)
+{
+    bool enteringMaterial = dot(nO, wI) < 0.0f;
+    float3 n = enteringMaterial ? nO : -nO;
+    float a = remapRoughness(material.roughness, dot(n, wI));
+    float3 m = sampleGGXDistribution(n, randomSample.bsdfSample, a);
+
+    float etaI = enteringMaterial ? material.extIOR : material.intIOR;
+    float etaO = enteringMaterial ? material.intIOR : material.extIOR;
+    float eta = etaI / etaO;
+
+    float F = fresnelDielectric(wI, m, eta);
+
+    float3 wO = { };
+    if (randomSample.componentSample > F)
+    {
+        float cosThetaI = dot(m, -wI);
+        float sinThetaOSquared = (eta * eta) * (1.0f - cosThetaI * cosThetaI);
+        float cosThetaO = sqrt(saturate(1.0f - sinThetaOSquared));
+
+        wO = normalize(eta * wI + m * (eta * cosThetaI - cosThetaO));
+
+        if (dot(n, wI) * dot(n, wO) <= 0.0f) return {};
+    }
+    else
+    {
+        wO = reflect(wI, m);
+        if (dot(n, wO) * dot(n, wI) >= 0.0f) return {};
+    }
+
+    return evaluate(material, nO, wI, wO);
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+*(please refer to the [original paper](https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.pdf) for the derivation and details)*
+
+**It is important** to pass original (not flipped normal) into the `evaluate` method, since it could be used separately and also does the same check.
+
+Evaluation method would also be a little bit more tricky. We have to determine two conditions, based on normal, incoming and outgoing directions:
+ - if given set of incoming direction and normal describes ray that enters or exits material;
+ - if given set of directions describes reflected vector;
+
+ In our case ray enters material if dot product between normal and incoming direction is less than zero,
+ so this is pretty easy to calculate. And if the incoming ray and outgoing ray lies in the same hemisphere it means that
+ ray was reflected (from any side of the material - either interal or external).
+
+ Now we know if ray enters material, it means we can flip normal and chose proper indices of refraction \(\eta_i\) and \(\eta_o\)
+ (actually we can just use their ratio). Now, if ray was reflected we can calculate BRDF, pretty much as we did with plastic.
+ But if ray is transmitted we will use another values for BSDF *(again please refer to the
+ [original paper](https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.pdf) for the derivation and details)*:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+inline SampledMaterial evaluate(device const Material& material,
+    float3 nO, float3 wI, float3 wO)
+{
+    SampledMaterial result = { wO };
+
+    bool enteringMaterial = dot(nO, wI) < 0.0f;
+    float3 n = enteringMaterial ? nO : -nO;
+
+    float NdotI = -dot(n, wI);
+    float NdotO = dot(n, wO);
+    bool reflection = NdotO * NdotI > 0.0f;
+
+    float eta = enteringMaterial ?
+        (material.extIOR / material.intIOR) : (material.intIOR / material.extIOR);
+
+    float3 m = normalize(reflection ? (wO - wI) : (wI * eta - wO));
+    m *= (dot(n, m) < 0.0f) ? -1.0f : 1.0f;
+
+    float MdotI = -dot(m, wI);
+    float MdotO = dot(m, wO);
+    float NdotM = dot(n, m);
+    float alpha = remapRoughness(material.roughness, NdotI);
+
+    float F = fresnelDielectric(wI, m, eta);
+    float D = ggxNormalDistribution(alpha, n, m);
+    float G = ggxVisibilityTerm(alpha, wI, wO, n, m);
+
+    if (reflection)
+    {
+        float J = 1.0f / (4.0f * MdotO);
+
+        result.bsdf = material.specular * (D * G * F / (4.0f * NdotI));
+        result.pdf = F * J;
+        result.weight = material.specular;
+        result.eta = 1.0f;
+    }
+    else
+    {
+        float J = MdotI / sqr(MdotI * eta + MdotO);
+
+        float value = (1.0f - F) * D * G * MdotI * MdotO /
+            (NdotI * sqr(MdotI * eta + MdotO));
+
+        result.bsdf = material.transmittance * abs(value);
+        result.pdf = (1.0f - F) * J;
+
+        result.weight = material.transmittance;
+        result.eta = eta;
+    }
+
+    result.pdf *= D * NdotM;
+    result.weight *= abs(G * MdotI / (NdotI * NdotM));
+    result.valid = uint(dot(result.bsdf, result.bsdf) > 0.0f) *
+        uint(result.pdf > 0.0f);
+
+    return result;
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+*(notice that we have an extra parameter in our `SampledMaterial` structure, named `eta`, it is required for the
+russian roulette, which will be described below)*
+
+If we did everything correctly - it will give us nice glass spheres:
+
+![](images/pic-9.png)
 
 Unbiased rendering
 ================================================================================
-Probability of terminating a path
+Before this part we had a custom number of bounces per pixel each frame. But this introduces bias to our rendering,
+since not all bounces are taken into the account. If we want to be physically based we have to calculate infinite
+amount of bounces, but how can we do that?
 
-![](images/pic-1.png)
+At first we need to refactor our rendering code. Before this part it was like (in very rough pseudocode):
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+void render()
+{
+    generateRays();
+    for (int i = 0; i < bounces; ++i)
+    {
+        bounce();
+    }
+    accumulate();
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+But now, lets distribute not samples, but **bounces** in time:
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+void render()
+{
+    generateRaysIfRequired();
+    bounce();
+    accumulateCompletedRays();
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+Each ray will have a property, describing if the ray has finished his path. We will be only generating new rays if
+current one is completed and accumulate image only using completed rays. Like:
+
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+kernel void generateRays(
+    device Ray* rays [[buffer(0)]],
+    device const RandomSample* noise [[buffer(1)]],
+    constant ApplicationData& appData [[buffer(2)]],
+    uint2 coordinates [[thread_position_in_grid]],
+    uint2 size [[threads_per_grid]])
+{
+    uint rayIndex = coordinates.x + coordinates.y * size.x;
+    device Ray& r = rays[rayIndex];
+    if ((appData.frameIndex == 0) || (r.completed != 0))
+    {
+        // generate a new ray
+        ...
+    }
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+and
+
+<script type="preformatted">
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
+kernel void accumulateImage(
+    texture2d<float, access::read_write> image [[texture(0)]],
+    device const Ray* rays [[buffer(0)]],
+    constant ApplicationData& appData [[buffer(1)]],
+    uint2 coordinates [[thread_position_in_grid]],
+    uint2 size [[threads_per_grid]])
+{
+    uint rayIndex = coordinates.x + coordinates.y * size.x;
+    device const Ray& currentRay = rays[rayIndex];
+    if (currentRay.completed && (currentRay.generation < MAX_SAMPLES))
+    {
+        // accumulate image
+        ...
+    }
+}
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+</script>
+
+This will give us potentialy an infinite number of bounces for each ray. And ray will be completed only if it goes
+out of scene and hits background. But imagine a scene, which is completely surrounded by geometry and there is no change
+for ray to escape it. I've added such scene to my [ray-tracing references repository](https://github.com/sergeyreznik/raytracing-references),
+in this scene camera is located inside glowing sphere, and no ray could escape it. We need to make sure such scenes
+will also be handled properly. Luckily for us, there is one method than not only makes this possible, but is commonly used.
+This method is called russian roulette. The idea behind it to chose a probability of terminating ray and terminate it ...
+
+// TODO : finish this part, now too sleepy
+
+*(read more about russian roulette [here](http://www.pbr-book.org/3ed-2018/Monte_Carlo_Integration/Russian_Roulette_and_Splitting.html))*
 
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
