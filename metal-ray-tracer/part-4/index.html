@@ -12,6 +12,11 @@ validate ray-tracer.
 
 ![Scene from Pica Pica](images/pic-0.png)
 
+**A small note:**
+
+I will use a term "BSDF" (bidirectional scattering distribution function) rather than "BRDF" (bidirectional reflection distribution function) 
+because it is more general and describes not only reflections, but also transmittance and diffuse scattering.
+
 Easy way to validate results
 ================================================================================
 Before implementing new materials, we need to figure out a way to make sure that our materials are
@@ -43,20 +48,23 @@ color = (diff > 0.0f) ?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 
+Obviously, in this situation colors like (1, 0, 0) and (0, 0, 1) would look the same, but we are trying to compare brightness of 
+the pixel, but not it's color. Also that's why I decided to compare average values, rather than color converted to grayscale. 
+Comparing colors converted to grayscale is more proper method, but difference in blue colors (for example) would be much noticable than in green.
+
 Ideally we would see a black color if we matched the reference perfectly. But in the real world there a several factors 
 that won't allow us to see a perfect zero difference:
 - number of samples are usually limited, which leads to noise;
 - .exr format (to which Mitsuba and PBRT can save results) stores data as half floats (16 bits), which introduces rounding errors.
 
-This mean that when we implemented everything correctly we will likely be seeing a red-green noise on the image. 
+This mean that even when we implemented everything correctly we will likely be seeing a red-green noise on the image. 
 
 Compare the difference images below. These are difference between images above and the reference image:
 
 ![](images/pic-3.png)![](images/pic-4.png)
 
 Note the glass box: on the first image we can see an almost uniform red-green noise, 
-while on the second image glass box has noticeable darker (reddish) sides. Tall box is brighter on the both images, this will be explained below,
-when we will implement plastic BRDF.
+while on the second image glass box has noticeable darker (reddish) sides. 
 
 This is very rough method to estimate a similarity to the reference, but it gives results almost immediately.
 
@@ -65,7 +73,7 @@ Furnace test
 Another (and actually more proper) way to validate materials is so called "Furnace test". The name comes from a property of a furnace in thermal equilibrium. 
 When a furnace reaches equilibrium, its interior has a completely uniform appearance, causing all geometric features to disappear [^](http://www.scratchapixel.com/lessons/3d-basic-rendering/global-illumination-path-tracing/global-illumination-path-tracing-practical-implementation).
 The idea behind it is to put a white object, (which does not absorb light) usually a sphere, to the environment having uniform color.
-If BRDF is implemented correctly (i.e. have energy conservation property) then the object will have color of the environment -
+If BSDF is implemented correctly (i.e. have energy conservation property) then the object will have the color of the environment -
 it will not absorb light and will not emit any additional light. Usually it is good idea to make a gray environment,
 in this way it would be easier to notice energy gain.
 
@@ -73,7 +81,7 @@ Take a look on these three images:
 
 ![](images/pic-5.png)![](images/pic-6.png)![](images/pic-7.png)
 
-The first one - is the correct plastic BRDF implementation. In the second one BRDF was not multiplied by cosine between normal and outgoing ray direction,
+The first one - is the correct plastic BSDF implementation. In the second one BSDF was not multiplied by cosine between normal and outgoing ray direction,
 the third one does not account for Fresnel in diffuse component and probability distribution function.
 
 So now we have a least two methods to verify our BSDFs, so let's implement plastic and dielectric materials. But before
@@ -92,7 +100,7 @@ inline SampledMaterial evaluateMaterial(device const Material& material,
 SampledMaterial sampleMaterial(device const Material& material,
     float3 nO, float3 wI, device const RandomSample& randomSample)
 {
-    // sample outgoing direction and the call evaluateMaterial
+    // sample outgoing direction and then call evaluateMaterial
     // with the corresponding wO
     ...
 }
@@ -104,7 +112,7 @@ We will be using `sampleMaterial` (which will call `evaluateMaterial` inside) fo
 `evaluateMaterial` method.
 
 
-Plastic BRDF
+Plastic BSDF
 ================================================================================
 Plastic material consists of two components - specular and diffuse. It reflects portion of light (specular component)
 and absorbs and then re-emits rest of the light (diffuse component). The exact amount of reflected light is defined by
@@ -130,12 +138,13 @@ inline float fresnelDielectric(float3 i, float3 m, float eta)
 }
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
+*(read more on [Fresnel reflectance](http://www.pbr-book.org/3ed-2018/Reflection_Models/Specular_Reflection_and_Transmission.html#FresnelReflectance) in PBRT)*
 
 Where `eta` is ratio of index of refractions - IOR of medium from light arrives divided by IOR of
 medium to which light is being transmitted. For plastic it is common case to use 1.5 as IOR, but we want this to be
 customizable.
 
-In order to sample plastic material, we need to decide if this would be reflected of diffuse ray. We can use Fresnel
+In order to sample plastic material, we need to decide if this would be reflected or diffuse ray. We can use Fresnel
 equations here as well, and say that probability of generating reflected ray is equal to the value of Fresnel:
 
 <script type="preformatted">
@@ -169,17 +178,17 @@ inline SampledMaterial sample(device const Material& material,
 
 Therefore, we are generating either reflected ray or uniformly (actually cosine-weighted) ray around geometric normal.
 
-Now we need a function that evaluates plastic material. We will be using the same microfacet BRDF which we used for
+Now we need a function that evaluates plastic material. We will be using the same microfacet BSDF which we used for
 conductors in the previous part, but now instead of `fresnelConductor` we will be using `fresnelDielectric` method.
 As we mentioned before - part of the light will be reflected (specular component) - this part is defined by microfacet
-material, and diffuse part is defined by the same diffuse BRDF but scaled with `(1.0f - F)`, which means that diffuse light
+material, and diffuse part is defined by the same diffuse BSDF but scaled with `(1.0f - F)`, which means that diffuse light
 is all light which was not reflected.
 
 Since we used Fresnel term as a probability for generating reflected ray we need to plug it into the
-probability density function. PDF of plastic material also consists of PDF of microfacet BRDF scaled by probability of
-generating reflected ray (`F`) and PDF of diffuse BRDF, scaled by probability of generating diffuse ray (`1.0f - F`).
-Since we can't nicely cancel components of `brdf / pdf` as we did with conductor material - we will write weight
-just as a ratio between BRDF and PDF:
+probability density function. PDF of plastic material also consists of PDF of microfacet BSDF scaled by probability of
+generating reflected ray (`F`) and PDF of diffuse BSDF, scaled by probability of generating diffuse ray (`1.0f - F`).
+Since we can't nicely cancel components of `bsdf / pdf` as we did with conductor material - we will write weight
+just as a ratio between BSDF and PDF:
 
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
@@ -245,19 +254,7 @@ Now let's get to the implementation of sampling method itself.
 At first, we should remember that there are two cases for the transmitted ray. One when ray enters denser medium and
 the second when rays goes from denser medium:
 
-*****************************************
-* 1)                | 2)                *
-*         n         |          n        *
-* wI \    ^         |          ^   ^ wO *
-*     \   |         |          |  /     *
-*      \  |         |          | /      *
-*       v |         |          |/       *
-* ---------------   |   --------------- *
-*         \         |         ^         *
-*          \        |        /          *
-*           \       |       /           *
-*            v wO   |   wI /            *
-*****************************************
+![](images/d-1.png) ![](images/d-2.png)
 
 The difference is that in the second case we need to flip a normal, in order to make our computation consistent,
 considering \((\omega_i • n) < 0.0 \). Also, we need to use proper indices of refraction for incoming and outgoing rays:
@@ -307,7 +304,8 @@ Now we can sample a microfacet around correctly oriented normal, compute Fresnel
 }
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
-*(please refer to the [original paper](https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.pdf) for the derivation and details)*
+*(please refer to the [original paper](https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.pdf) for the derivation and details, 
+section 5.3 - Sampling and weights, Eq. 39, 40)*
 
 **It is important** to pass original (not flipped normal) into the `evaluate` method, since it could be used separately and also does the same check.
 
@@ -344,15 +342,7 @@ if \(\omega_o\) lies in the other hemisphere than \(\omega_i\) - it mean that th
 Now we need to determine a half-vector, or microfacet. For the reflection it would just normalized sum of incoming and
 outgoing vectors (but since we considering \((\omega_i • n) < 0.0\), we should take incoming direction with negative sign):
 
-********************
-*                  *
-*         m        *
-* -wI ^   |   ^ wO *
-*      \  |  /     *
-*       \ | /      *
-*        \|/       *
-* ---------------- *
-********************
+![](images/d-3.png)
 
 But for the refraction, the half vector is computed slightly differently. In general case it would be:
 
@@ -362,17 +352,7 @@ But since we have \(\omega_i\) flipped, we can rewrite this as:
 
 \(m = \omega_i * \eta - \omega_o\)
 
-*****************************
-*                  |        *
-*                  |        *
-* -(wI x eta)      |        *
-*  <---------------|        *
-*              /  /|\       *
-*          /---  / | \      *
-*      /---     /  |  \     *
-*   m v    -wO v   |   v wO *
-*****************************
-*(unfortunately Markdeep seems to be unable to draw such type of lines)*
+![](images/d-4.png)
 
 Also, if we flipped a normal, we need to make sure that normal and microfacet both lies in the same hemisphere:
 
@@ -385,9 +365,9 @@ Also, if we flipped a normal, we need to make sure that normal and microfacet bo
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 
-Now, everything is ready and if ray was reflected we can calculate specular BRDF, pretty much as we did with plastic.
+Now, everything is ready and if ray was reflected we can calculate specular BSDF, pretty much as we did with plastic.
 But if ray is transmitted we will use another values for BSDF *(again please refer to the
-[original paper](https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.pdf) for the derivation and details)*:
+[original paper](https://www.cs.cornell.edu/~srm/publications/EGSR07-btdf.pdf) for the derivation and details, sections 4 and 5)*:
 
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
@@ -462,7 +442,7 @@ void render()
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 
-But now, lets distribute not samples, but **bounces** in time:
+But now, let's distribute not samples, but **bounces** in time:
 
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
