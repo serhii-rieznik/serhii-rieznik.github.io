@@ -277,7 +277,7 @@ We can make this buffers located comletely in the GPU memory, since we don't nee
 
 Our last steps would be to write compute shaders for generating rays and handling intersection and dispatch them.
 For this first steps demo we will be using orthographic projection. We will generate one ray per pixel, which starts from
-`(u, v, -1.0)` and goes in `(u, v, 1.0)` direction (remember, our triangle located in the XY plane, with `z = 0`):
+`(u, v, -1.0)` and goes in `(0.0, 0.0, 1.0)` direction (remember, our triangle located in the XY plane, with `z = 0`):
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Obj-C
 kernel void generateRays(
