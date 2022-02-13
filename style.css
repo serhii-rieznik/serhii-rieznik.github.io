@@ -1,0 +1,7 @@
+/* Darkmode, wide screen: TOC on side */
+@media screen and (min-device-width: 600px) {
+    body {
+        color: #c0c0c0;
+        background: #202020;
+    }
+}
