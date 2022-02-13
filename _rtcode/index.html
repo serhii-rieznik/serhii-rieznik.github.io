@@ -1,0 +1,112 @@
+<meta charset="utf-8" emacsmode="-*- markdown -*-"><link rel="stylesheet" href="../style.css?">
+
+**How much code you need to write a ray-tracer?**
+
+# Introduction
+
+If you want to write a ray-tracer from scratch you would usually start from something simple, like **Ray Tracing in One Weekend**. 
+There will be spheres, planes, rays. Eventually you want to render a bunny, so you will add simple 3D model loading, which would require 
+adding triangles, and routines for triangle intersection, then area light sources, envrionment images, participating media... 
+
+The list could be continued forever. And then at some point you realize that you want to render a caustics (either from refractive from glass,
+or reflective from metals). And now you need to learn stuff about bidirectional renders, and add even more code to make it work.
+
+In this post I want to give an idea how much code is needed to write a bidirectional ray-tracer, which can produce images like this:
+
+![](images/beams.png width="192px")![](images/volumetric-refractions.png width="192px")
+
+The purpose of this post is to rather serve as a checklist and starting point, than scary and frustrate people who are learning ray-tracing. 
+Also it describes my personal experience.
+
+So let's take a closer look!
+
+# Code for unidirectional ray-tracer
+
+Let's pretend we are writing a unidirectional path-tracing from scratch. 
+
+## Images
+The first thing you would want to have is to see a result of your work. Therefore you need an ability to save an image. 
+
+Right now we are not talking about UI and visualizing images on the screen, which is rather important feature 
+together with debug visualization. Let's just start from saving a result to a file. A lot of projects using something like PPM file format, which 
+is very simple, but in the end you need to write an extra code for this simplicitly (like tone mapping, converting from floating point values to uint8, etc)
+
+That's why I propose to have an output in `float4` (RGBA32F) format and use **[LINK]** tinyexr library for writing HDR images in EXR format. 
+This library would also be useful in the future for loading EXR images.
+
+## Intersections
+Now you want to actually trace something. There is at least three ways to it: 
+- write all intersection and BVH code by yourself;
+- build and use open-source third-party library;
+- use something like **[LINK]** Intel Embree;
+
+I'd personally recommend going with the third option. Direct comparison between Embree and couple of other libraries from GitHub shows that 
+with Embree ray-tracer could be easily 2x faster even when using the most naive way (tracing one ray without batching them). 
+And the integration and usage of Embree is quite simple.
+
+But of course it highly depends on your personal motivation and purposes. If you want to get an exeprience writing everything from the scratch - just do it!
+
+Having the intersection routines you now can hardcode a couple of triangles and see if everything works. Let's move to the actual geometry!
+
+## Scene 
+Now you want to load some geometry from files. The easiest way to do it would be using something like **[LINK]** tinyobjloader. I think OBJ is still 
+one of the most popular format around because it's simplicity. Of course you might want to load GLTF files, or even something more complicated. 
+But the point is that now you have a bunch of triangles and vertices which you uploaded to your intersection library and you desperate to trace them.
+
+At this point you can hardcode some camera parameters and throw some rays, and actually see a result. But it's good time to add a camera to your ray-tracer.
+
+## Camera
+The easiest way to setup a camera in the scene would be to define a position and a view point, and a field of view. 
+If you are loading format which contains camera data (like GLTF) - it would be even simpler. 
+But anyway you would need a code which builds camera data (like matrices). 
+
+And now having a camera data you could easily generate rays for the specific camera configuration. Going through each pixel of the image you need to 
+generate a ray for this specific pixel, so there should be two functions - to get NDC coordinates from a pixel, and to generate ray out of this coordinates.
+
+At this point you'd probably could see something like that in output:
+![](images/barycentrics.png width="192px")![](images/normals.png width="192px")
+
+And this is definitely a good start, but let's move on.
+
+## Multithreading
+So far we were using a simple loop over all pixels in image. But this is not the fastest way. We usually want to spread a workload over all threads we 
+have and get a result as fast as possible. Any option is suitable - you could write your own scheduler or use a library. I am using 
+[enkiTS](https://github.com/dougbinks/enkiTS) with a wrapper around.
+
+## Materials
+At this point you could write a fully functional ambient occlusion integrator which launches rays in the scene, and the secondary rays to see if geometry
+is occluded. And when it will be working - is a good time to add a colors to your renderings. For that purpose you will be need to introduce materials.
+Usually you could start from simple diffuse materials, and then eventually add more and more of them.
+
+## Textures
+
+## Light sources
+
+## Environment images
+
+## Medium
+
+# Bidirectional path tracing
+
+## Output image wrapper
+
+## New methods for emitters and camera
+
+# Spectral Rendering
+
+## Basics
+
+## Spectrums
+
+## Refraction Indices
+
+# Conclusion
+As you see the real amount of code if really huge. But you should not be scared, because every other piece of code could be added on top of
+existing code to improve your renderings. Start from small steps and eventually you will be able to render a beautifull images!
+
+# Support
+
+# Links
+
+<style class="fallback">body{visibility:hidden}</style><script>markdeepOptions={tocStyle:'long'};</script>
+<!-- Markdeep: --><script src="https://casual-effects.com/markdeep/latest/markdeep.min.js?" charset="utf-8"></script>
