@@ -1,6 +1,6 @@
 <meta charset="utf-8" emacsmode="-*- markdown -*-"><link rel="stylesheet" href="../style.css?">
 
-**How much code you need to write a ray-tracer?**
+**How much boilerplate code you need to write a ray-tracer?**
 
 # Introduction
 
@@ -78,11 +78,51 @@ At this point you could write a fully functional ambient occlusion integrator wh
 is occluded. And when it will be working - is a good time to add a colors to your renderings. For that purpose you will be need to introduce materials.
 Usually you could start from simple diffuse materials, and then eventually add more and more of them.
 
-## Textures
+Also now we can enable a very simple light sources. Just use emissive color of material, and if ray hit such material - it will contribute to the ray's
+result.
+
+And since we are using materials - we can now start using importance sampling. The very first method would be to sample material's BSDF 
+to determine the best next direction for ray, rather than selecting a direction randomly in hemisphere around normal. 
+Each material has it's own "preferred" directions, but in general - the most commonly used ones are:
+- cosine-weighted direction on a hemisphere (for diffuse materials);
+- perfect specular reflections and refractions (basically `reflect` and `refract` functions) - for mirror and glass materials;
+- some normal distribution (GGX is most commonly used now) for more complex reflections and refractions.
+
+Also if we want to render realistic metals or glass materials - we should take care of Fresnel coefficients. 
+They are calculated differently for metals and non-metals, which adds a bit more boilerplate code.
 
 ## Light sources
+So far so good. We are sending rays, which bounces around on our scene and gathering light. And after waiting some time our algorithm would 
+be able to produce image like this:
 
-## Environment images
+![128 samples per pixel](images/cb-step-1.png width="192px")
+
+Looks good, but look on those noise. The whole image is noisy even using only diffuse materials. To fix this issue we have a Next Event Estimation,
+or simply sending an additional rays directly to a light sources. At the first sight looks simple - we have a list of emissive triangles on a scene,
+and we just randomly picking one and sending a "shadow" ray to it. If this ray reaches emissive triangle - we adding it's contribtion to the ray's radiance.
+But! If on some scene we have two triangle, one of which is really huge and covers like half of a scene, and a second one is microscopic, and picking them
+randomly (each with 50% probability) - then contribution from microscopic triangle will be neglectible, and image would still have a lot of noise.
+
+Whan we can do in this situation? Pick lights not randomly, but based on their contribution to the whole lighting in a scene. And here comes an 
+additional code, which would also will greatly serve us in a future. I am talking about generating and sampling distributions tables 
+(see links section for the some great posts about generating them). So another piece of boilerplate code would be to generate and sample random numbers,
+based on some random value distributions. In our example we would want to sample huge emissive triangle in 95% of cases, and small one only in 5%.
+
+Now we have a helpers which allow us to sample proper light sources and we are ready for plug in Multiple Importance Sampling. Basic idea behind it is
+to weight a light contribution according to a probabilities of sampling light source and sampling BSDF. And here we need another piece of boilerplate code
+which randomly selects an emitter and evaluates probability of sampling it.
+
+Now we can render the same image with same 128 samples per pixel, and get this result:
+
+![128 spp](images/cb-step-1.png width="192px") ![128 spp + MIS](images/cb-step-2.png width="192px")
+
+## Textures
+Now to add another dimension to our rendering we would want to use textures. For that we need routines to load images and evaluate them at the certain
+coordinates. For that I'd suggest to use libraries like [LINK] tinyexr and [LINK] stb_image. Also keep in mind that different materials might refer
+to the same images, which adds another piece of boilerplate code - to manage images and save some memory.
+
+## Environment images / distant emitters
+So far we were using only emissive triangles to illuminate our scene.
 
 ## Medium
 
@@ -101,12 +141,47 @@ Usually you could start from simple diffuse materials, and then eventually add m
 ## Refraction Indices
 
 # Conclusion
-As you see the real amount of code if really huge. But you should not be scared, because every other piece of code could be added on top of
-existing code to improve your renderings. Start from small steps and eventually you will be able to render a beautifull images!
+As a recap we can make a list of methods/routines which are used in ray-tracer:
+- writing output images;
+- intersection routines;
+- scene loading code;
+- camera code:
+  - generating rays (considering depth of field);
+  - sampling image plane;
+  - evaluating pdf and importance for a given ray;
+- multithreading code (considering multithreaded writes to output image);
+- materials and BSDF code:
+  - sampling BSDF; 
+  - evaluating BSDF for a given ray;
+  - evaluating probabilities for a given ray;
+  - **everything above times N materials**;
+- light sources:
+  - building a distribution table for light sources in scene;
+  - sampling light sources accorindg to the distribution table;
+  - evaluating light source contribution for a given ray;
+  - sampling an emission from light source (position, direction, contribution, probabilities);
+  - **everything above times M light source types**;
+- medium rendering:
+  - calculating transmittance;
+  - sampling medium;
+  - sampling phase functions;
+  - code for loading .vdb files for heterogeneous medium;
+- spectral rendering:
+  - code for handling spectral distributions (creating, loading, evaluating);
+  - converting spectral values to XYZ/RGB color spaces;
+  - sampling wavelengths;
+  - ability to switch between RGB or spectral rendering.
+
+As you see the real amount of code if really huge. And we did not even touch GPU code.
+
+But you should not be scared, because every other piece of code could be added on top of existing code to improve your renderings. 
+Start from small steps and eventually you will be able to render a beautifull images!
 
 # Support
 
 # Links
+
+[Generating Random Numbers From a Specific Distribution By Inverting the CDF](https://blog.demofox.org/2017/08/05/generating-random-numbers-from-a-specific-distribution-by-inverting-the-cdf/)
 
 <style class="fallback">body{visibility:hidden}</style><script>markdeepOptions={tocStyle:'long'};</script>
 <!-- Markdeep: --><script src="https://casual-effects.com/markdeep/latest/markdeep.min.js?" charset="utf-8"></script>
