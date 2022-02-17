@@ -31,14 +31,14 @@ Right now, we are not talking about UI and visualizing images on the screen, whi
 together with debug visualization. Let's just start with saving a result to a file. A lot of projects using something like PPM file format, which 
 is very simple, but in the end, you need to write an extra code for this simplicity (like tone mapping, converting from floating point values to uint8, etc.)
 
-That's why I propose to have an output in `float4` (RGBA32F) format and use **[LINK]** tinyexr library for writing HDR images in EXR format. 
-This library would also be useful in the future for loading EXR images.
+That's why I propose to have an output in `float4` (RGBA32F) format and use [tinyexr](https://github.com/syoyo/tinyexr) library for writing 
+HDR images in EXR format. This library would also be useful in the future for loading EXR images.
 
 ## Intersections
 Now you want to actually trace something. There is at least three ways to it: 
 - write all intersection and BVH code by yourself;
 - build and use open-source third-party library;
-- use something like **[LINK]** Intel Embree.
+- use something like [Intel Embree](https://www.embree.org/).
 
 I'd personally recommend going with the third option. Direct comparison between Embree and couple of other libraries from GitHub shows that 
 with Embree ray-tracer could be easily 2x faster even when using the most naive way (tracing one ray without batching them). 
@@ -49,8 +49,8 @@ But of course, it highly depends on your personal motivation and purposes. If yo
 Having the intersection routines, you can now hardcode a couple of triangles and see if everything works. Let's move to the actual geometry!
 
 ## Scene 
-Now you want to load some geometry from files. The easiest way to do it would be using something like **[LINK]** tinyobjloader. I think OBJ is still 
-one of the most popular formats around because it's simplicity. Of course, you might want to load GLTF files, or even something more complicated. 
+Now you want to load some geometry from files. The easiest way to do it would be using something like [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader).
+I think OBJ is still one of the most popular formats around because it's simplicity. Of course, you might want to load GLTF files, or even something more complicated. 
 But the point is that now you have a bunch of triangles and vertices which you upload to your intersection library and you desperate to trace them.
 
 At this point you can hardcode some camera parameters and throw some rays, and actually see a result. But it's good time to add a camera to your ray-tracer.
@@ -118,8 +118,8 @@ Now we can render the same image with same 128 samples per pixel, and get this r
 
 ## Textures
 Now to add another dimension to our rendering we would want to use textures. For that we need routines to load images and evaluate them at the certain
-coordinates. For that I suggest using libraries like [LINK] tinyexr and [LINK] stb_image. Also keep in mind that different materials might refer
-to the same images, which adds another piece of boilerplate code - to manage images and save some memory.
+coordinates. For that I suggest using libraries like tinyexr and [stb_image](https://github.com/nothings/stb). Also keep in mind that 
+different materials might refer to the same images, which adds another piece of boilerplate code - to manage images and save some memory.
 
 ## Environment images / distant emitters
 So far, we've being using only emissive triangles to illuminate our scene. But there are other types of emitters which adds more realism to a scene.
@@ -229,9 +229,25 @@ As you see the real amount of code is really big. And we did not even touch GPU 
 But don't be scared, because every other piece of code could be added on top of existing code to improve your renderings. 
 Start with small steps and eventually you will be able to render beautiful images!
 
-# Support
+# Implementation and support
+Most of the things I described here are already implemented in my ray-tracer: [etx-tracer](https://github.com/sergeyreznik/etx-tracer)
+
+You can support my open-source development by becoming a [sponsor on GitHub](https://github.com/sponsors/sergeyreznik)
+
+Thank you for reading!
+
+# Useful Libraries
+- [Intel Embree](https://github.com/embree/embree) - High Performance Ray Tracing Kernels
+- [enkits](https://github.com/dougbinks/enkiTS) - A permissively licensed C and C++ Task Scheduler for creating parallel programs
+- [glm](https://github.com/g-truc/glm) - OpenGL Mathematics
+- [stb_image](https://github.com/nothings/stb) - stb single-file public domain libraries for C/C++
+- [tinyexr](https://github.com/syoyo/tinyexr) - Tiny OpenEXR image loader/saver library
+- [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader) - Tiny but powerful single file wavefront obj loader
+- [mikktspace](https://github.com/mmikk/MikkTSpace) - A common standard for tangent space used in baking tools to produce normal maps.
 
 # Links
+
+[Physically Based Rendering:From Theory To Implementation](https://www.pbr-book.org/) 
 
 [Generating Random Numbers From a Specific Distribution By Inverting the CDF](https://blog.demofox.org/2017/08/05/generating-random-numbers-from-a-specific-distribution-by-inverting-the-cdf/)
 
