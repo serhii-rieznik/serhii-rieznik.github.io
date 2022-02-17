@@ -4,18 +4,18 @@
 
 # Introduction
 
-If you want to write a ray-tracer from scratch you would usually start from something simple, like **Ray Tracing in One Weekend**. 
-There will be spheres, planes, rays. Eventually you want to render a bunny, so you will add simple 3D model loading, which would require 
+If you want to write a ray-tracer from scratch you would usually start with something simple, like **Ray Tracing in One Weekend**. 
+There will be spheres, planes, rays. Eventually you would want to render a bunny, so you add a simple 3D model loading, which would require 
 adding triangles, and routines for triangle intersection, then area light sources, environment images, participating media... 
 
-The list could be continued forever. And then at some point you realize that you want to render a caustics (either from refractive from glass,
+The list could be continued forever. And then at some point you realize that you want to render a caustics (either as a refraction from glass,
 or reflective from metals). And now you need to learn stuff about bidirectional renderers and add even more code to make it work.
 
-In this post I want to give an idea how much code is needed to write a bidirectional ray-tracer, which can produce images like this:
+In this post I want to give you an idea how much code is needed to write a bidirectional ray-tracer, which can produce images like this:
 
 ![](images/teapot.png width="192px")![](images/beams.png width="192px")
 
-The purpose of this post is to rather serve as a checklist and starting point, than scary and frustrate people who are learning raytracing. 
+The purpose of this post is to rather serve as a checklist and starting point, than to scare and frustrate people who are learning raytracing. 
 Also, it describes my personal experience.
 
 Let's take a closer look!
@@ -28,7 +28,7 @@ Let's pretend we are writing a unidirectional path-tracing from scratch.
 The first thing you would want to have is to see a result of your work. Therefore, you need an ability to save an image. 
 
 Right now, we are not talking about UI and visualizing images on the screen, which is rather important feature 
-together with debug visualization. Let's just start from saving a result to a file. A lot of projects using something like PPM file format, which 
+together with debug visualization. Let's just start with saving a result to a file. A lot of projects using something like PPM file format, which 
 is very simple, but in the end, you need to write an extra code for this simplicity (like tone mapping, converting from floating point values to uint8, etc.)
 
 That's why I propose to have an output in `float4` (RGBA32F) format and use **[LINK]** tinyexr library for writing HDR images in EXR format. 
@@ -42,16 +42,16 @@ Now you want to actually trace something. There is at least three ways to it:
 
 I'd personally recommend going with the third option. Direct comparison between Embree and couple of other libraries from GitHub shows that 
 with Embree ray-tracer could be easily 2x faster even when using the most naive way (tracing one ray without batching them). 
-And the integration and usage of Embree is quite simple.
+And the integration and using of Embree is quite simple.
 
-But of course, it highly depends on your personal motivation and purposes. If you want to get an experience writing everything from the scratch - just do it!
+But of course, it highly depends on your personal motivation and purposes. If you want to get an experience writing everything from scratch - just do it!
 
-Having the intersection routines, you now can hardcode a couple of triangles and see if everything works. Let's move to the actual geometry!
+Having the intersection routines, you can now hardcode a couple of triangles and see if everything works. Let's move to the actual geometry!
 
 ## Scene 
 Now you want to load some geometry from files. The easiest way to do it would be using something like **[LINK]** tinyobjloader. I think OBJ is still 
 one of the most popular formats around because it's simplicity. Of course, you might want to load GLTF files, or even something more complicated. 
-But the point is that now you have a bunch of triangles and vertices which you uploaded to your intersection library and you desperate to trace them.
+But the point is that now you have a bunch of triangles and vertices which you upload to your intersection library and you desperate to trace them.
 
 At this point you can hardcode some camera parameters and throw some rays, and actually see a result. But it's good time to add a camera to your ray-tracer.
 
@@ -63,20 +63,20 @@ But anyway, you would need a code which builds camera data (like matrices).
 And now having a camera data you could easily generate rays for the specific camera configuration. Going through each pixel of the image you need to 
 generate a ray for this specific pixel, so there should be two functions - to get NDC coordinates from a pixel, and to generate ray out of these coordinates.
 
-At this point you'd probably could see something like that in output:
+At this point you'd probably see something like that in the output:
 ![](images/barycentrics.png width="192px")![](images/normals.png width="192px")
 
 And this is definitely a good start, but let's move on.
 
 ## Multithreading
-So far, we were using a simple loop over all pixels in image. But this is not the fastest way. We usually want to spread a workload over all threads we 
+So far, we were using a simple loop over all pixels of the image. But this is not the fastest way. We usually want to spread a workload over all threads we 
 have and get a result as fast as possible. Any option is suitable - you could write your own scheduler or use a library. I am using 
 [enkiTS](https://github.com/dougbinks/enkiTS) with a wrapper around.
 
 ## Materials
-At this point you could write a fully functional ambient occlusion integrator which launches rays in the scene, and the secondary rays to see if geometry
+At this point you could write a fully functional ambient occlusion integrator that launches rays in the scene, and secondary rays to see if geometry
 is occluded. And when it will be working - is a good time to add colors to your renderings. For that purpose, you will need to introduce materials.
-Usually, you could start from simple diffuse materials, and then eventually add more and more of them.
+Usually, you could start with simple diffuse materials, and then eventually add more and more of them.
 
 Also, now we can enable very simple light sources. Just use emissive color of material, and if ray hit such material - it will contribute to the ray's
 result.
@@ -92,7 +92,7 @@ Also, if we want to render realistic metals or glass materials - we should take 
 They are calculated differently for metals and non-metals, which adds a bit more boilerplate code.
 
 ## Light sources
-So far so good. We are sending rays, which bounces around on our scene and gathering light. And after waiting some time our algorithm would 
+So far so good. We are sending rays, that are bouncing around in our scene and gathering light. And after waiting for some time our algorithm would 
 be able to produce image like this:
 
 ![128 samples per pixel](images/cb-step-1.png width="192px")
@@ -101,7 +101,7 @@ Look at those noise. The whole image is noisy even using only diffuse materials.
 or simply sending additional rays directly to light sources. At the first sight looks simple - we have a list of emissive triangles on a scene,
 and we just randomly picking one and sending a "shadow" ray to it. If this ray reaches emissive triangle - we are adding its contribution to the ray's radiance.
 But! If on some scene we have two triangles, one of which is really huge and covers like half of a scene, and a second one is microscopic, and picking them
-randomly (each with 50% probability) - then contribution from microscopic triangle will be neglectable, and image would still have a lot of noise.
+randomly (each with 50% probability) - then contribution from microscopic triangle will be negligible, and image would still have a lot of noise.
 
 Whan we can do in this situation? Pick lights not randomly but based on their contribution to the whole lighting in a scene. And here comes an 
 additional code, which would also greatly serve us in a future. I am talking about generating and sampling distributions tables 
@@ -118,18 +118,18 @@ Now we can render the same image with same 128 samples per pixel, and get this r
 
 ## Textures
 Now to add another dimension to our rendering we would want to use textures. For that we need routines to load images and evaluate them at the certain
-coordinates. For that I'd suggest using libraries like [LINK] tinyexr and [LINK] stb_image. Also keep in mind that different materials might refer
+coordinates. For that I suggest using libraries like [LINK] tinyexr and [LINK] stb_image. Also keep in mind that different materials might refer
 to the same images, which adds another piece of boilerplate code - to manage images and save some memory.
 
 ## Environment images / distant emitters
-So far, we were using only emissive triangles to illuminate our scene. But there are other types of emitters which adds more realism to a scene.
+So far, we've being using only emissive triangles to illuminate our scene. But there are other types of emitters which adds more realism to a scene.
 We will focus on distant emitters (like Sun) and environment maps. The first ones (like Sun) just require adding another pieces of a code for sampling 
 and evaluating them.
 
-But adding environment emitters would require additional effort. Since environment image is literally everywhere in a scene (surrounds it) - 
+But adding environment emitters would require additional effort. Since environment image is literally everywhere in the scene (surrounds it) - 
 the question is - which direction should be sampled? If the image is uniform (contains one color everywhere), then there is no difference, and 
 random direction on a sphere would work. But let's say image contains a very bright light source (like Sun among clouds), or in the corner case 
-there is only one pixel on the image which is not black. Now selecting a random direction on a sphere would not work, since most of time we will 
+there is only one pixel on the image which is not black. Now selecting a random direction on a sphere will not work, since most of the time we will 
 miss this bright pixel, and scene will be poorly lit with a lot of noise. 
 
 To fix this issue we need to build a two-dimensional sampling table. Similar to what we used to select emitters on a scene, but now it will be used
@@ -145,7 +145,7 @@ After implementing sampling tables for the environment maps you will be able to 
 (this image is actually produced by bidirectional path tracing, read about it below)
 
 ## Medium
-Medium rendering is another dimension of a ray-tracer. Adding participating media to scenes can greatly increase an atmosphere. 
+Medium rendering is another dimension of a ray-tracer. Adding participating media to the scene can greatly increase an atmosphere. 
 Compare these three images:
 ![](images/teapot-1.png width="192px")![](images/teapot-2.png width="192px")![](images/teapot-3.png width="192px")
 
@@ -157,8 +157,8 @@ values for reflections and refractions. The differences are noticeable, and what
 The medium could be homogenous (uniform in the whole volume) and heterogeneous (variable density in a volume). Adding medium rendering to ray-tracer
 requires an effort, because not only a lot of new boilerplate code should be introduced, but the whole rendering algorithm should be adjusted.
 
-But let's focus on a boilerplate code which required for medium rendering. At first you obviously need to add something which stores medium parameters
-(usually, it is absorption and outscattering coefficients and phase function asymmetry value). The next methods would be medium sampling - different for
+But let's focus on a boilerplate code that is required for rendering medium. At first you obviously need to add something that stores medium's parameters
+(usually, that is absorption, outscattering coefficients and phase function asymmetry value). The next methods would be medium sampling - different for
 homogenous and heterogeneous (actually, most of the methods would be different for these two types, so I won't mention this anymore). 
 Next thing (which is probably common for different medium types) would be to evaluate phase function (which is kind of replacement for BSDF for "solid"
 materials), and sample phase function for selecting next ray direction.
@@ -169,9 +169,9 @@ VDB and a library for loading it - OpenVDB. It would require some time to build 
 it is very simple.
 
 # Bidirectional path tracing
-So far, we were talking only about unidirectional method. It traces light from the camera to scene and samples/hits emitters. For certain 
+So far, we've being talking only about unidirectional method. It traces light from the camera to scene and samples/hits emitters. For certain 
 types of materials and/or emitters it is hard for these methods to capture enough light, and rendering could be noisy after a lot of samples. 
-Good examples are glass surfaces, like water. When ray walks behind a water it has no chance to sample light source above the water, and therefore
+Good examples are glass surfaces, like water. When ray walks behind the water it has no chance to sample light source above the water, and therefore
 not enough light information will be available. Rendering will be noisy and won't have nice caustics. Compare these two images:
 
 ![](images/caustics-1.png width="192px")![](images/caustics-2.png width="192px")
@@ -226,8 +226,8 @@ As a recap we can make a list of methods/routines which are used in ray-tracer:
 
 As you see the real amount of code is really big. And we did not even touch GPU code.
 
-But you should not be scared, because every other piece of code could be added on top of existing code to improve your renderings. 
-Start from small steps and eventually you will be able to render beautiful images!
+But don't be scared, because every other piece of code could be added on top of existing code to improve your renderings. 
+Start with small steps and eventually you will be able to render beautiful images!
 
 # Support
 
