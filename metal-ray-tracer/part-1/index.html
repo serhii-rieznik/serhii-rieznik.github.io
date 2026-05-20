@@ -1,5 +1,6 @@
-<meta charset="utf-8">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="../../style.css?">
 **Metal ray-tracer: tracing our first triangle**
+<div class="site-header"><a href="../../index.html">main page</a></div>
 
 In this post I will describe the basics of using Metal Performance Shaders.
 We will set-up a project and execute some compute shaders on GPU. And then we are going to trace one hard-coded triangle.
@@ -84,7 +85,7 @@ would be `drawableSizeWillChange` method:
     outputImageDescriptor.pixelFormat = MTLPixelFormatRGBA32Float;
     outputImageDescriptor.width = NSUInteger(size.width);
     outputImageDescriptor.height = NSUInteger(size.height);
-    outputImageDescriptor.usage |= MTLTextureUsageShaderWrite;
+    outputImageDescriptor.usage |= MTLTextureUsageShaderWrite | MTLTextureUsageShaderRead;
     outputImageDescriptor.storageMode = MTLStorageModePrivate;
 
     _outputImage = [_device newTextureWithDescriptor:outputImageDescriptor];
@@ -92,7 +93,8 @@ would be `drawableSizeWillChange` method:
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 Since we are going to use this texture only on GPU we will specify `storageMode` as `MTLStorageModePrivate`.
-And we need to add `MTLTextureUsageShaderWrite` to the texture's usage to be able to write data into it in the compute shader.
+And we need to add `MTLTextureUsageShaderWrite` to the texture's usage to be able to write data into it in the compute shader,
+and `MTLTextureUsageShaderRead` because later we will sample this texture in the blit fragment shader.
 
 Now let's create a `MTLComputePipelineState` object and initialize it with our `imageFillTest` function. For this I've created helper method
 <script type="preformatted">
@@ -115,7 +117,7 @@ Another useful utility method would be the one which actually dispatches specifi
 
     setupBlock(commandEncoder);
 
-    [commandEncoder setComputePipelineState:_testComputeShader];
+    [commandEncoder setComputePipelineState:pipelineState];
     [commandEncoder dispatchThreads:_outputImageSize
     threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
     [commandEncoder endEncoding];
@@ -341,15 +343,6 @@ In the [next post](../part-2/index.html) we will load and trace geometry from a 
 prepare an environment for path tracing, and implement simple diffuse BRDF with next event estimation
 
 [Return to the index](../index.html)
-
-Support
-=======================================================
-<form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
-  <input type="hidden" name="cmd" value="_s-xclick" />
-  <input type="hidden" name="hosted_button_id" value="2BYWG6QUS8VSJ" />
-  <input type="image" src="https://www.paypalobjects.com/en_US/DK/i/btn/btn_donateCC_LG.gif" border="0" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Donate with PayPal button" />
-  <img alt="" border="0" src="https://www.paypal.com/en_DE/i/scr/pixel.gif" width="1" height="1" />
-</form>
 
 <!-- Markdeep: -->
 <style class="fallback">body{visibility:hidden;white-space:pre;font-family:monospace}</style>

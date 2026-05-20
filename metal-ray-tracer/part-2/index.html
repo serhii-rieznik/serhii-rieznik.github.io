@@ -1,5 +1,6 @@
-<meta charset="utf-8">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="../../style.css?">
 **Implementing diffuse BRDF**
+<div class="site-header"><a href="../../index.html">main page</a></div>
 
 In the [first post](../part-1/index.html) we've prepared an environment and
 traced our first triangle using Metal Performance shaders.
@@ -420,8 +421,8 @@ for (EmitterTriangle& t : emitterTriangleBuffer)
 }
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
-And now let's add one dummy triangle with cdf equals to one to the back of the list, it will be used to randomly sample one triangle. 
-We just need it's cdf to be one, but no other fields are requied, since this fake triangle will never be selected in the shader:
+And now let's add one dummy triangle with cdf equals to one to the back of the list, it will be used as a sentinel while sampling one triangle. 
+We just need its cdf to be one, but no other fields are required, since this fake triangle should never be selected in the shader:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 emitterTriangleBuffer.emplace_back();
@@ -442,14 +443,15 @@ and find one with cdf value not larger than our random value ξ:
 device const EmitterTriangle& sampleEmitterTriangle(
     device const EmitterTriangle* triangles, uint triangleCount, float xi)
 {
+    xi = min(xi, 0.99999994f);
     uint index = 0;
-    for (; (index < triangleCount) && (triangles[index + 1].cdf <= xi); ++index);
+    for (; ((index + 1) < triangleCount) && (triangles[index + 1].cdf <= xi); ++index);
     return triangles[index];
 }
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 </script>
 Notice `triangles[index + 1].cdf` here. This why we added a dummy triangle with cdf equals to one to the end of the list.
-If ξ will be equal to one - last triangle in the array will be selected.
+The `triangleCount` passed to this function includes the sentinel, and clamping `xi` below one keeps the sentinel from being selected.
 
 Now, having one sampled triangle we can choose a random point within it. We will be need another two random values
 (luckily, we have 4-component floats in our noise array). In order to select a random point inside triangle we need to
@@ -607,7 +609,7 @@ of selecting one triangle in our array (which is `triangle_area / total_area`) s
 of selecting on point uniformly on the triangle's surface equals to `1.0 / triangle_area`, but we need to convert it to the 
 probability of selecting direction on unit sphere. There is a simple relationship between this values:
 
-\(pdf(direction) = d^2 / (cosθ * triangleArea)\)
+\(pdf(direction) = d^2 / (abs(cosθ) * triangleArea)\)
 
 Where \(d\) is distance between current point and selected point on the triangle, 
 and \(θ\) is an angle between direction to the selected point and the normal on the light's surface at the selected point.
@@ -618,6 +620,11 @@ Let's take a look at the code:
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
 float cosTheta = -dot(directionToLight, lightVertex.n);
+if (cosTheta <= 0.0f)
+{
+    return;
+}
+
 float pointSamplePdf = (distanceToLight * distanceToLight) /
     (emitterTriangle.area * cosTheta)
 
@@ -661,15 +668,6 @@ And actually, this is very close to the image produced by [Mitsuba](https://www.
 [Next part](../part-3-1/index.html)
 
 [Return to the index](../index.html)
-
-Support
-=======================================================
-<form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
-  <input type="hidden" name="cmd" value="_s-xclick" />
-  <input type="hidden" name="hosted_button_id" value="2BYWG6QUS8VSJ" />
-  <input type="image" src="https://www.paypalobjects.com/en_US/DK/i/btn/btn_donateCC_LG.gif" border="0" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Donate with PayPal button" />
-  <img alt="" border="0" src="https://www.paypal.com/en_DE/i/scr/pixel.gif" width="1" height="1" />
-</form>
 
 <!-- Markdeep: -->
 <style class="fallback">body{visibility:hidden;white-space:pre;font-family:monospace}</style>

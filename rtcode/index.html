@@ -1,6 +1,7 @@
-<meta charset="utf-8" emacsmode="-*- markdown -*-"><link rel="stylesheet" href="../style.css?">
+<meta charset="utf-8" emacsmode="-*- markdown -*-"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="../style.css?">
 
 **How much boilerplate code you need to write a ray-tracer?**
+<div class="site-header"><a href="../index.html">main page</a></div>
 
 # Introduction
 
@@ -8,8 +9,9 @@ If you want to write a ray-tracer from scratch you would usually start with some
 There will be spheres, planes, rays. Eventually you would want to render a bunny, so you add a simple 3D model loading, which would require 
 adding triangles, and routines for triangle intersection, then area light sources, environment images, participating media... 
 
-The list could be continued forever. And then at some point you realize that you want to render a caustics (either as a refraction from glass,
-or reflective from metals). And now you need to learn stuff about bidirectional renderers and add even more code to make it work.
+The list could be continued forever. And then at some point you realize that you want to render caustics (either as refraction from glass,
+or reflection from metals). Plain unidirectional path tracing can handle these effects in theory, but often converges poorly, so you may need
+to learn about bidirectional renderers, photon mapping, MLT, VCM, or similar methods and add even more code to make it practical.
 
 In this post I want to give you an idea how much code is needed to write a bidirectional ray-tracer, which can produce images like this:
 
@@ -147,7 +149,11 @@ After implementing sampling tables for the environment maps you will be able to 
 ## Medium
 Medium rendering is another dimension of a ray-tracer. Adding participating media to the scene can greatly increase an atmosphere. 
 Compare these three images:
-![](images/teapot-1.png width="192px")![](images/teapot-2.png width="192px")![](images/teapot-3.png width="192px")
+<div class="image-row image-row-three">
+    <img src="images/teapot-1.png" width="192" alt="">
+    <img src="images/teapot-2.png" width="192" alt="">
+    <img src="images/teapot-3.png" width="192" alt="">
+</div>
 
 Left image was rendered without participating media and without tuning reflection and refraction colors, 
 middle one was rendered with manually tuned material parameters, and the right one was rendered using participating media and with default (white)
@@ -183,15 +189,15 @@ quite a challenge. But let's focus on what is required to make them work.
 
 ## Output image wrapper
 In "regular" path tracing we are going through each pixel of an image and therefore we precisely know a location of a pixel to be updated, and each 
-thread was changing only this specific pixel. In the bidirectional methods paths from light sources are connected to a random point on the image plane, 
-and therefore, each thread could randomly change random pixel on the image. Without proper handling such approach could result a race condition and 
-missing light information. Therefore, something special should be added to a code which will allow to avoid a race conditions. Like an atomic write, or
-atomic addition to the image data or having multiple images (one for each thread) and then merging them into the output image.
+thread was changing only this specific pixel. Some bidirectional and light-tracing techniques can produce contributions for pixels other than the one
+that started the current path. Without proper handling such approach could result a race condition and missing light information. Therefore, some
+implementations need something special in the code, such as atomic writes, atomic additions to the image data, or multiple images (one for each thread)
+that are later merged into the output image.
 
 ## New methods for emitters and camera
-As mentioned before in bidirectional methods vertices from light path are connected to points randomly selected on the image plane. Therefore, 
-another method should be added to our code base which will allow to randomly select points there. This should also include calculating probabilities
-for multiple importance sampling methods.
+Bidirectional methods also need camera-side sampling and evaluation routines, because light subpaths may be connected to camera subpaths or projected
+onto the image plane depending on the technique. Therefore, another method should be added to our code base which will allow to randomly select points
+there. This should also include calculating probabilities for multiple importance sampling methods.
 
 And one more thing to build path from emitters is to actually select a place where this path will begin. Methods for this are similar to sampling 
 light sources from the specific points, but now we will generate points directly on emitters (either triangles, or in case of environment emitters
@@ -229,10 +235,8 @@ As you see the real amount of code is really big. And we did not even touch GPU 
 But don't be scared, because every other piece of code could be added on top of existing code to improve your renderings. 
 Start with small steps and eventually you will be able to render beautiful images!
 
-# Implementation and support
+# Implementation
 Most of the things I described here are already implemented in my ray-tracer: [etx-tracer](https://github.com/sergeyreznik/etx-tracer)
-
-You can support my open-source development by becoming a [sponsor on GitHub](https://github.com/sponsors/sergeyreznik)
 
 Thank you for reading!
 

@@ -1,12 +1,21 @@
-<meta charset="utf-8" emacsmode="-*- markdown -*-"><link rel="stylesheet" href="../style.css?">
+<meta charset="utf-8" emacsmode="-*- markdown -*-"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="../style.css?">
 
 **Writing ray-tracer using Metal Performance Shaders**
+<div class="site-header"><a href="../index.html">main page</a></div>
     
 In this series of posts I'm going to describe ray-tracer implementation
 using [Metal Performance Shaders](https://developer.apple.com/documentation/metalperformanceshaders).
 Apple already have [ray-tracing demo](https://developer.apple.com/documentation/metalperformanceshaders/metal_for_accelerating_ray_tracing)
 but we will start from scratch and implement a more physically correct ray-tracer
 with next event estimation, multiple importance sampling, spectral rendering and maybe something else :)
+
+2026 note
+=======================================================================================
+This series is still useful for learning path-tracing concepts, GPU ray generation,
+material sampling, next event estimation, multiple importance sampling, and validation.
+However, the Metal API layer is historical: it uses `MPSRayIntersector`, which is now
+deprecated. If you are starting a new Metal ray tracer today, use Metal's acceleration
+structure APIs instead, and treat the MPS-specific setup in these posts as legacy code.
 
 Before the start
 =======================================================================================
@@ -58,16 +67,6 @@ Going slightly physically based
 =======================================================================================
 In [this post](part-4/index.html) we going to make several steps towards physically-correct rendering.
 We going to add two more BSDFs, validate BSDFs and rewrite our ray-tracer to have potentially infinite number of bounces.
-
-Support
-=======================================================
-<form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
-  <input type="hidden" name="cmd" value="_s-xclick" />
-  <input type="hidden" name="hosted_button_id" value="2BYWG6QUS8VSJ" />
-  <input type="image" src="https://www.paypalobjects.com/en_US/DK/i/btn/btn_donateCC_LG.gif" border="0" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Donate with PayPal button" />
-  <img alt="" border="0" src="https://www.paypal.com/en_DE/i/scr/pixel.gif" width="1" height="1" />
-</form>
-
 
 <style class="fallback">body{visibility:hidden}</style><script>markdeepOptions={tocStyle:'long'};</script>
 <!-- Markdeep: --><script src="https://casual-effects.com/markdeep/latest/markdeep.min.js?" charset="utf-8"></script>

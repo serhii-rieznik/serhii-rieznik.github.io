@@ -1,7 +1,8 @@
-<meta charset="utf-8">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="../../style.css?">
 **Improving material system**
+<div class="site-header"><a href="../../index.html">main page</a></div>
 
-In the [previous post](../part-3-2/index.html) we added a multiple bounces to our ray-tracer. We introduced
+In the [previous post](../part-3-1/index.html) we added multiple bounces to our ray-tracer. We introduced
 importance sampling, which helps us to estimate a rendering equation more precisely and implemented global
 illumination in the scene with diffuse materials. Now lets make our material system more explicit to be able to
 add new materials to the scenes.
@@ -257,11 +258,11 @@ To generate a new direction according to this material we will use:
 
 <script type="preformatted">
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Obj-C
-float3 reflected = reflect(wI, n);
 ...
 case MATERIAL_CONDUCTOR:
 {
-    wO = sampleGGXDistribution(reflected, noiseSample.wz, material.roughness);
+    float3 h = sampleGGXDistribution(n, noiseSample.wz, material.roughness);
+    wO = reflect(wI, h);
     break;
 }
 
@@ -302,7 +303,7 @@ adding some radiance to the ray and then sampling BSDF in the same direction. An
 along the same direction, and this light source will contribute to the ray's radiance twice. Seems like we can average
 samples in this case (i.e take light sampling result with weight 0.5, and BSDF sampling result with the same weight).
 But this will work only when we are sampling BSDF and the ligh sources in exactly one direction. But since there are a lot
-of random values around - this rarely happens. The real solution for this problem will be to use **balance heuristic** for weights.
+of random values around - this rarely happens. The real solution for this problem will be to use **power heuristic** for weights.
 Let's say \(f_p\) is the probability of sampling light source, and \(g_p\) is the probability of sampling BSDF (generating
 a new direction for the ray, exactly what we are doing in `sampleMaterial` function). Then weight of the light sampling
 would be:
@@ -389,15 +390,6 @@ produced by Mitsuba renderer (I've included sample scene):
 [Next post](../part-4/index.html)
 
 [Return to the index](../index.html)
-
-Support
-=======================================================
-<form action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
-  <input type="hidden" name="cmd" value="_s-xclick" />
-  <input type="hidden" name="hosted_button_id" value="2BYWG6QUS8VSJ" />
-  <input type="image" src="https://www.paypalobjects.com/en_US/DK/i/btn/btn_donateCC_LG.gif" border="0" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Donate with PayPal button" />
-  <img alt="" border="0" src="https://www.paypal.com/en_DE/i/scr/pixel.gif" width="1" height="1" />
-</form>
 
 <!-- Markdeep: -->
 <style class="fallback">body{visibility:hidden;white-space:pre;font-family:monospace}</style>
