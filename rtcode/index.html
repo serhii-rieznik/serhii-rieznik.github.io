@@ -15,7 +15,10 @@ to learn about bidirectional renderers, photon mapping, MLT, VCM, or similar met
 
 In this post I want to give you an idea how much code is needed to write a bidirectional ray-tracer, which can produce images like this:
 
-![](images/teapot.png width="192px")![](images/beams.png width="192px")
+<div class="image-row image-row-two">
+    <img src="images/teapot.png" width="192" alt="">
+    <img src="images/beams.png" width="192" alt="">
+</div>
 
 The purpose of this post is to rather serve as a checklist and starting point, than to scare and frustrate people who are learning raytracing. 
 Also, it describes my personal experience.
@@ -66,7 +69,10 @@ And now having a camera data you could easily generate rays for the specific cam
 generate a ray for this specific pixel, so there should be two functions - to get NDC coordinates from a pixel, and to generate ray out of these coordinates.
 
 At this point you'd probably see something like that in the output:
-![](images/barycentrics.png width="192px")![](images/normals.png width="192px")
+<div class="image-row image-row-two">
+    <img src="images/barycentrics.png" width="192" alt="">
+    <img src="images/normals.png" width="192" alt="">
+</div>
 
 And this is definitely a good start, but let's move on.
 
@@ -97,7 +103,9 @@ They are calculated differently for metals and non-metals, which adds a bit more
 So far so good. We are sending rays, that are bouncing around in our scene and gathering light. And after waiting for some time our algorithm would 
 be able to produce image like this:
 
-![128 samples per pixel](images/cb-step-1.png width="192px")
+<div class="image-row image-row-single">
+    <img src="images/cb-step-1.png" width="192" alt="128 samples per pixel">
+</div>
 
 Look at those noise. The whole image is noisy even using only diffuse materials. To fix this issue we have a Next Event Estimation,
 or simply sending additional rays directly to light sources. At the first sight looks simple - we have a list of emissive triangles on a scene,
@@ -116,7 +124,10 @@ And here we need another piece of boilerplate code which randomly selects an emi
 
 Now we can render the same image with same 128 samples per pixel, and get this result:
 
-![128 spp](images/cb-step-1.png width="192px") ![128 spp + MIS](images/cb-step-2.png width="192px")
+<div class="image-row image-row-two">
+    <img src="images/cb-step-1.png" width="192" alt="128 spp">
+    <img src="images/cb-step-2.png" width="192" alt="128 spp + MIS">
+</div>
 
 ## Textures
 Now to add another dimension to our rendering we would want to use textures. For that we need routines to load images and evaluate them at the certain
@@ -142,7 +153,9 @@ there is also a lot of implementation details, which you should be aware of (lik
 
 After implementing sampling tables for the environment maps you will be able to render images like that:
 
-![Image lit by one pixel in the environment map](images/teapot-medium.png)
+<div class="image-row image-row-single">
+    <img src="images/teapot-medium.png" alt="Image lit by one pixel in the environment map">
+</div>
 
 (this image is actually produced by bidirectional path tracing, read about it below)
 
@@ -180,7 +193,10 @@ types of materials and/or emitters it is hard for these methods to capture enoug
 Good examples are glass surfaces, like water. When ray walks behind the water it has no chance to sample light source above the water, and therefore
 not enough light information will be available. Rendering will be noisy and won't have nice caustics. Compare these two images:
 
-![](images/caustics-1.png width="192px")![](images/caustics-2.png width="192px")
+<div class="image-row image-row-two">
+    <img src="images/caustics-1.png" width="192" alt="">
+    <img src="images/caustics-2.png" width="192" alt="">
+</div>
 
 Left one is rendered with unidirectional path tracing, right with bidirectional. Both have 256 samples per pixel.
 
